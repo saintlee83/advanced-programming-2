@@ -61,6 +61,7 @@ _ICONS = {
     "moon": '<path d="M20 15.5A9 9 0 0 1 8.5 4 9 9 0 1 0 20 15.5Z"/>',
     "sun": '<circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5"/>',
     "rank": '<path d="M4 21V11h5v10m0 0V4h6v17m0 0V8h5v13M2 21h20"/>',
+    "compare": '<path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4"/>',
     "info": '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.1"/>',
 }
 
@@ -126,6 +127,7 @@ def apply_theme(app, dark: bool) -> None:
         }}
         QFrame[role="metric"][featured="true"] {{ background: {t.accent_soft}; border-color: {t.accent_soft}; }}
         QLabel[role="metricValue"] {{ font-size: 28px; font-weight: 700; letter-spacing: -1px; }}
+        QLabel[role="comparisonValue"] {{ font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }}
         QFrame[featured="true"] QLabel[role="metricValue"] {{ color: {t.accent}; }}
         QLabel[role="metricUnit"] {{ color: {t.ink_soft}; font-size: 12px; padding-bottom: 4px; }}
         QLabel[role="regionTag"] {{ color: {t.accent}; font-size: 11px; font-weight: 700; }}

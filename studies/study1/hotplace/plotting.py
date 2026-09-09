@@ -15,9 +15,9 @@ from PyQt5.QtCore import QSize
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch
-from matplotlib.ticker import FuncFormatter, MultipleLocator
+from matplotlib.ticker import FuncFormatter, MaxNLocator, MultipleLocator
 
-from .hotplace import AgePyramid, LineSeries
+from .hotplace import AgePyramid, LineSeries, PairedAnalysis
 
 from .theme import DARK, LIGHT, Theme, set_theme, theme
 
@@ -116,15 +116,21 @@ def _style_axes(ax) -> None:
     ax.tick_params(colors=theme().ink_soft, labelsize=8.5, length=0, pad=9)
 
 
-def draw_line_series(canvas: PlotCanvas, series: LineSeries) -> None:
+def draw_line_series(canvas: PlotCanvas, series: LineSeries, *, ax=None,
+                     title: str | None = None, compact: bool = False,
+                     single_color: str | None = None) -> None:
     """시간대별 꺾은선 그래프. 계열은 최대 2개를 전제로 한다."""
-    canvas.clear()
-    ax = canvas.figure.add_subplot(111)
+    standalone = ax is None
+    if standalone:
+        canvas.clear()
+        ax = canvas.figure.add_subplot(111)
     _style_axes(ax)
 
     hours = list(range(24))
     for i, (label, values) in enumerate(zip(series.labels, series.values)):
         color = theme().series[i % len(theme().series)]
+        if len(series.values) == 1 and single_color:
+            color = single_color
         ax.plot(hours, values, label=label, color=color, linewidth=2.3,
                 linestyle="-" if i == 0 else (0, (5, 3)),
                 solid_capstyle="round", zorder=3 + i)
@@ -133,18 +139,22 @@ def draw_line_series(canvas: PlotCanvas, series: LineSeries) -> None:
         peak = max(hours, key=lambda h: values[h])
         ax.plot([peak], [values[peak]], marker="o", markersize=6, color=color,
                 markeredgecolor=theme().surface, markeredgewidth=1.6, zorder=6)
+        peak_text = f"{label} 최대 {peak}시 · {values[peak]:,.0f}명"
+        if compact:
+            peak_text = f"{peak}시 · {values[peak]:,.0f}명"
         ax.annotate(
-            f"{label} 최대 {peak}시 · {values[peak]:,.0f}명",
+            peak_text,
             xy=(peak, values[peak]),
             xytext=(0, 11 if i == 0 else -19),
             textcoords="offset points",
             ha="left" if peak <= 5 else "right" if peak >= 18 else "center",
-            fontsize=8.5, color=theme().ink_soft, zorder=7,
+            fontsize=7.5 if compact else 8.5, color=theme().ink_soft, zorder=7,
             path_effects=_halo(),
         )
 
-    ax.set_title(series.title, fontsize=12, fontweight="bold", color=theme().ink, pad=30, loc="left")
-    if series.note:
+    ax.set_title(title or series.title, fontsize=10.5 if compact else 12,
+                 fontweight="bold", color=theme().ink, pad=18 if compact else 30, loc="left")
+    if series.note and not compact:
         ax.text(0, 1.045, series.note, transform=ax.transAxes,
                 fontsize=8.5, color=theme().ink_soft, va="bottom")
 
@@ -158,11 +168,14 @@ def draw_line_series(canvas: PlotCanvas, series: LineSeries) -> None:
     span = (hi - lo) or (hi or 1.0)
     ax.set_ylim(lo - span * 0.14, hi + span * 0.16)
     if len(series.values) == 1:
-        ax.fill_between(hours, series.values[0], lo - span * 0.14,
-                        color=theme().series[0], alpha=0.065, zorder=2)
+        ax.fill_between(hours, series.values[0], 0 if compact else lo - span * 0.14,
+                        color=single_color or theme().series[0], alpha=0.065, zorder=2)
     ax.xaxis.set_major_locator(MultipleLocator(1))
-    ax.set_xticks(hours)
+    ax.set_xticks([0, 4, 8, 12, 16, 20, 23] if compact else hours)
     ax.yaxis.set_major_formatter(FuncFormatter(_thousands))
+    if compact:
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=5))
+        ax.tick_params(labelsize=8)
 
     # 계열이 2개 이상일 때만 범례를 둔다. 1개면 제목이 이미 이름을 말해 준다.
     if len(series.labels) > 1:
@@ -171,14 +184,18 @@ def draw_line_series(canvas: PlotCanvas, series: LineSeries) -> None:
         for text in legend.get_texts():
             text.set_color(theme().ink_soft)
 
-    canvas.figure.set_layout_engine("tight", pad=1.8)
-    canvas.draw_idle()
+    if standalone:
+        canvas.figure.set_layout_engine("tight", pad=1.8)
+        canvas.draw_idle()
 
 
-def draw_age_pyramid(canvas: PlotCanvas, pyramid: AgePyramid) -> None:
+def draw_age_pyramid(canvas: PlotCanvas, pyramid: AgePyramid, *, ax=None,
+                     title: str | None = None, compact: bool = False) -> None:
     """연령대별 남/녀 인구 피라미드 (남자는 왼쪽으로 눕힌 가로 막대)."""
-    canvas.clear()
-    ax = canvas.figure.add_subplot(111)
+    standalone = ax is None
+    if standalone:
+        canvas.clear()
+        ax = canvas.figure.add_subplot(111)
     ax.set_facecolor(theme().surface)
     ax.grid(True, axis="x", color=theme().grid, linewidth=0.8, linestyle="-")
     ax.set_axisbelow(True)
@@ -201,8 +218,9 @@ def draw_age_pyramid(canvas: PlotCanvas, pyramid: AgePyramid) -> None:
     ax.set_ylabel("연령대", fontsize=9, color=theme().ink_soft, labelpad=6)
     ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{abs(v):,.0f}"))
 
-    ax.set_title(pyramid.title, fontsize=12, fontweight="bold", color=theme().ink, pad=30, loc="left")
-    if pyramid.note:
+    ax.set_title(title or pyramid.title, fontsize=10.5 if compact else 12,
+                 fontweight="bold", color=theme().ink, pad=18 if compact else 30, loc="left")
+    if pyramid.note and not compact:
         ax.text(0, 1.045, pyramid.note, transform=ax.transAxes,
                 fontsize=8.5, color=theme().ink_soft, va="bottom")
 
@@ -211,7 +229,7 @@ def draw_age_pyramid(canvas: PlotCanvas, pyramid: AgePyramid) -> None:
         (pyramid.male, -1, theme().series[0], "남자"),
         (pyramid.female, 1, theme().series[1], "여자"),
     ):
-        if not values or max(values) <= 0:
+        if compact or not values or max(values) <= 0:
             continue
         top = max(positions, key=lambda i: values[i])
         ax.annotate(
@@ -232,5 +250,36 @@ def draw_age_pyramid(canvas: PlotCanvas, pyramid: AgePyramid) -> None:
     limit = max(max(pyramid.male, default=0), max(pyramid.female, default=0)) or 1.0
     ax.set_xlim(-limit * 1.5, limit * 1.5)
 
-    canvas.figure.set_layout_engine("tight", pad=1.8)
+    if standalone:
+        canvas.figure.set_layout_engine("tight", pad=1.8)
+        canvas.draw_idle()
+
+
+def draw_paired_analysis(canvas: PlotCanvas, comparison: PairedAnalysis) -> None:
+    """동일한 크기와 공통 축으로 두 지역을 비교한다."""
+    canvas.clear()
+    axes = canvas.figure.subplots(1, 2, sharex=True, sharey=True)
+    caption = comparison.analyses[0].title.removeprefix(comparison.regions[0]).strip()
+    canvas.figure.suptitle(f"{caption} · {comparison.note}", fontsize=9, color=theme().ink_soft)
+    is_age = isinstance(comparison.analyses[0], AgePyramid)
+    for index, (ax, region, result) in enumerate(zip(axes, comparison.regions, comparison.analyses)):
+        caption = f"{'AB'[index]} · {region}"
+        if is_age:
+            draw_age_pyramid(canvas, result, ax=ax, title=caption, compact=True)
+        else:
+            draw_line_series(canvas, result, ax=ax, title=caption, compact=True,
+                             single_color=theme().series[index])
+        # 공유 축이어도 양쪽에 같은 눈금과 단위를 표시한다.
+        ax.tick_params(labelleft=True)
+
+    if is_age:
+        limit = max(max(result.male + result.female, default=0)
+                    for result in comparison.analyses) or 1.0
+        axes[0].set_xlim(-limit * 1.2, limit * 1.2)
+        axes[0].xaxis.set_major_locator(MaxNLocator(nbins=4, symmetric=True))
+    else:
+        peak = max(max(values) for result in comparison.analyses for values in result.values)
+        axes[0].set_ylim(0, (peak or 1.0) * 1.2)
+
+    canvas.figure.set_layout_engine("tight", pad=1.4, w_pad=2.4)
     canvas.draw_idle()

@@ -14,7 +14,7 @@ from PyQt5.QtCore import QObject, QSize, Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QPalette
 from PyQt5.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox,
-    QFileDialog, QFrame, QHBoxLayout, QLabel,
+    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
     QLayout, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton, QScrollArea, QSizePolicy, QTabWidget, QVBoxLayout,
     QWidget,
@@ -25,17 +25,18 @@ from .dataset import (
     CodeBook, DataError, Dong, Population, default_data_dir,
     find_population_csv, load_population,
 )
-from .hotplace import Hotplace, rank_by_daily_average, summary_text
-from .plotting import PlotCanvas, draw_age_pyramid, draw_line_series, set_theme, theme
+from .hotplace import Hotplace, LineSeries, PairedAnalysis, rank_by_daily_average, summary_text
+from .plotting import PlotCanvas, draw_line_series, draw_paired_analysis, set_theme, theme
 from .theme import DARK, apply_theme, make_icon
 
 TAB_TITLES = (
     "시간대별 추이",
     "평일 · 주말",
     "성별 분포",
-    "지역 비교",
+    "추이 겹쳐보기",
     "연령별 분포",
 )
+OVERLAY_TAB = 3
 
 
 def _label(text: str, role: str, wrap: bool = False) -> QLabel:
@@ -126,7 +127,7 @@ class DongPickDialog(QDialog):
 class TopDongDialog(QDialog):
     """일평균 생활인구가 많은 행정동 목록. 핫플레이스 후보를 훑어볼 때 쓴다."""
 
-    def __init__(self, ranking: list[tuple[Dong, float]], parent=None) -> None:
+    def __init__(self, ranking: list[tuple[Dong, float]], parent=None, target="지역 A") -> None:
         super().__init__(parent)
         self.setWindowTitle("생활인구 상위 행정동")
         self.resize(520, 580)
@@ -136,7 +137,7 @@ class TopDongDialog(QDialog):
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
         layout.addWidget(_label("생활인구 TOP 20", "heading"))
-        layout.addWidget(_label("일평균 생활인구 기준 · 지역을 더블클릭해 분석하세요.", "muted"))
+        layout.addWidget(_label(f"일평균 생활인구 기준 · 더블클릭하면 {target}로 선택됩니다.", "muted"))
         self.list = QListWidget()
         for rank, (dong, value) in enumerate(ranking, start=1):
             self.list.addItem(f"{rank:02d}    {dong.label}     {value:,.0f} 명")
@@ -145,7 +146,7 @@ class TopDongDialog(QDialog):
         layout.addWidget(self.list)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText("지역 A로 선택")
+        buttons.button(QDialogButtonBox.Ok).setText(f"{target}로 선택")
         buttons.button(QDialogButtonBox.Cancel).setText("취소")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -258,29 +259,63 @@ class AnalysisTab(QWidget):
                 self.toolbar._actions[callback].setIcon(self.toolbar._icon(f"{image}.png"))
 
 
-class MetricCard(QFrame):
-    def __init__(self, title: str, unit: str, featured: bool = False) -> None:
+class RegionMetricsCard(QFrame):
+    """A와 B에 동일한 크기, 지표, 글자 크기를 적용하는 요약 카드."""
+
+    def __init__(self, region: str) -> None:
         super().__init__()
         self.setProperty("role", "metric")
-        self.setProperty("featured", featured)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(17, 15, 17, 15)
-        layout.setSpacing(7)
-        layout.addWidget(_label(title, "muted"))
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(14)
         row = QHBoxLayout()
-        row.setSpacing(5)
-        self.value = _label("—", "metricValue")
-        row.addWidget(self.value)
-        row.addWidget(_label(unit, "metricUnit"), 0, Qt.AlignBottom)
+        row.addWidget(_label(region, "regionTagB" if region == "지역 B" else "regionTag"))
+        self.name = _label("행정동 선택 전", "section")
+        row.addWidget(self.name)
         row.addStretch()
         layout.addLayout(row)
-        self.note = _label("데이터를 기다리고 있어요", "muted")
-        layout.addWidget(self.note)
+        layout.addWidget(_separator())
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        grid.setVerticalSpacing(12)
+        self.values: dict[str, QLabel] = {}
+        for index, (key, title, unit) in enumerate((
+            ("daily_avg", "일평균 생활인구", "명"),
+            ("peak_hour", "가장 붐비는 시간", "시"),
+            ("day_night_ratio", "주간 / 야간 인구", "배"),
+            ("weekend_ratio", "주말 / 평일 인구", "배"),
+        )):
+            cell = QVBoxLayout()
+            cell.setSpacing(4)
+            cell.addWidget(_label(title, "muted"))
+            numbers = QHBoxLayout()
+            numbers.setSpacing(5)
+            value = _label("—", "comparisonValue")
+            self.values[key] = value
+            numbers.addWidget(value)
+            numbers.addWidget(_label(unit, "metricUnit"), 0, Qt.AlignBottom)
+            numbers.addStretch()
+            cell.addLayout(numbers)
+            grid.addLayout(cell, index // 2, index % 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        layout.addLayout(grid)
 
-    def update_value(self, value: str, note: str) -> None:
-        self.value.setText(value)
-        self.note.setText(note)
+    def update_place(self, place: Hotplace | None) -> None:
+        self.name.setText(place.label if place else "행정동 선택 전")
+        if place is None:
+            for value in self.values.values():
+                value.setText("—")
+            self.setToolTip("")
+            return
+        summary = place.summary()
+        self.values["daily_avg"].setText(f"{summary['daily_avg']:,.0f}")
+        self.values["peak_hour"].setText(f"{summary['peak_hour']:02d}")
+        for key in ("day_night_ratio", "weekend_ratio"):
+            number = summary[key]
+            self.values[key].setText(f"{number:.2f}" if math.isfinite(number) else "—")
+        self.setToolTip(summary_text(place))
 
 
 class InsightCard(QFrame):
@@ -318,7 +353,7 @@ class MainWindow(QWidget):
         self.codebook: CodeBook | None = None
         self._thread: QThread | None = None
         self._worker: LoadWorker | None = None
-        self._results: dict[int, object] = {}     # 탭 index -> LineSeries / AgePyramid
+        self._results: dict[int, LineSeries | PairedAnalysis] = {}
 
         self._build_ui()
         self._prefill_paths()
@@ -327,7 +362,7 @@ class MainWindow(QWidget):
     def _build_ui(self) -> None:
         self.setObjectName("mainWindow")
         self.setWindowTitle("서울 생활인구 분석기 — Hotplace Analyzer")
-        self.resize(1320, 900)
+        self.resize(1440, 960)
         self.setMinimumSize(1080, 740)
         self._icon_buttons: list[tuple[QPushButton, str, bool]] = []
         apply_theme(QApplication.instance(), theme() is DARK)
@@ -356,8 +391,6 @@ class MainWindow(QWidget):
         controls.addWidget(_separator())
         controls.addWidget(self._build_region_group())
         controls.addStretch()
-        controls.addWidget(_label("SEOUL · LIVING POPULATION", "eyebrow"))
-        controls.addWidget(_label("머무는 사람들의 흐름으로\n서울의 일상을 읽어보세요.", "muted"))
         scroll.setWidget(contents)
         sidebar_layout.addWidget(scroll)
         body.addWidget(sidebar)
@@ -371,18 +404,15 @@ class MainWindow(QWidget):
         main.addLayout(self._build_overview())
         metrics = QHBoxLayout()
         metrics.setSpacing(12)
-        self.metric_cards = [
-            MetricCard("일평균 생활인구", "명", featured=True),
-            MetricCard("가장 붐비는 시간", "시"),
-            MetricCard("주간 / 야간 인구", "배"),
-            MetricCard("주말 / 평일 인구", "배"),
-        ]
-        for card in self.metric_cards:
-            metrics.addWidget(card, 1)
+        self.metrics_a = RegionMetricsCard("지역 A")
+        self.metrics_b = RegionMetricsCard("지역 B")
+        metrics.addWidget(self.metrics_a, 1)
+        metrics.addWidget(self.metrics_b, 1)
         main.addLayout(metrics)
         main.addWidget(self._build_chart_panel(), 1)
         main.addWidget(self._build_summary_group())
         dashboard_scroll = QScrollArea()
+        self.dashboard_scroll = dashboard_scroll
         dashboard_scroll.setWidgetResizable(True)
         dashboard_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         dashboard_scroll.setWidget(dashboard)
@@ -436,16 +466,16 @@ class MainWindow(QWidget):
         layout = QVBoxLayout()
         layout.setSpacing(5)
         row = QHBoxLayout()
-        row.addWidget(_label("POPULATION OVERVIEW", "eyebrow"))
+        row.addWidget(_label("REGION COMPARISON", "eyebrow"))
         row.addStretch()
         self.period_label = _label("분석 기간 —", "muted")
         row.addWidget(self.period_label)
         layout.addLayout(row)
         row = QHBoxLayout()
-        self.overview_title = _label("어느 동네가 궁금하세요?", "heading")
+        self.overview_title = _label("두 지역을 나란히 비교하세요", "heading")
         row.addWidget(self.overview_title)
         row.addStretch()
-        self.overview_note = _label("지역 A 기준", "muted")
+        self.overview_note = _label("동일 기간 · 공통 축 · 같은 지표", "muted")
         row.addWidget(self.overview_note)
         layout.addLayout(row)
         return layout
@@ -512,12 +542,24 @@ class MainWindow(QWidget):
         heading.addWidget(_label("지역 탐색", "section"))
         heading.addStretch()
         layout.addLayout(heading)
-        self.region_a = RegionSelector("지역 A · 분석 대상")
-        self.region_b = RegionSelector("지역 B · 비교 대상")
+        self.region_a = RegionSelector("지역 A")
+        self.region_b = RegionSelector("지역 B")
         self.region_a.changed.connect(self._on_region_changed)
         self.region_b.changed.connect(self._on_region_changed)
         layout.addWidget(self.region_a)
         layout.addWidget(self.region_b)
+        self.swap_button = self._button("지역 A ↔ B 서로 바꾸기", "compare")
+        self.swap_button.setEnabled(False)
+        self.swap_button.clicked.connect(self._swap_regions)
+        layout.addWidget(self.swap_button)
+        layout.addWidget(_label("모든 탭에서 두 지역을 같은 기준으로 분석합니다.", "muted", True))
+        target_row = QHBoxLayout()
+        target_row.addWidget(_label("검색 · 순위 선택 대상", "field"))
+        self.search_target = QComboBox()
+        self.search_target.addItems(["지역 A", "지역 B"])
+        self.search_target.setAccessibleName("검색 및 순위로 선택할 지역")
+        target_row.addWidget(self.search_target, 1)
+        layout.addLayout(target_row)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("행정동 검색 · 예: 역삼1동")
         self.search_edit.setAccessibleName("행정동명 검색")
@@ -536,7 +578,7 @@ class MainWindow(QWidget):
         self.top_button.clicked.connect(self._show_top_dongs)
         layout.addWidget(self.top_button)
         layout.addWidget(_label("지역을 바꾸면 분석이 바로 업데이트됩니다.", "muted", True))
-        for widget in (self.search_edit, self.search_button, self.top_button):
+        for widget in (self.search_edit, self.search_button, self.top_button, self.search_target):
             widget.setEnabled(False)
         return group
 
@@ -561,9 +603,12 @@ class MainWindow(QWidget):
         self.tab_pages = []
         for title in TAB_TITLES:
             page = AnalysisTab()
-            page.canvas.message("서울의 하루를 데이터로 만나보세요", "왼쪽에서 CSV 파일을 연결하면 시간대별 생활인구를 확인할 수 있어요.")
+            page.canvas.message("비교할 두 지역을 선택하세요", "CSV 파일을 연결하고 지역 A와 B를 고르면 같은 기준으로 분석합니다.")
             self.tabs.addTab(page, title)
             self.tab_pages.append(page)
+        for index in range(len(TAB_TITLES)):
+            self.tabs.setTabToolTip(index, "지역 A와 B를 같은 축 범위로 비교합니다.")
+        self.tabs.setTabToolTip(OVERLAY_TAB, "두 지역의 시간대별 생활인구를 하나의 그래프에 겹쳐 봅니다.")
         self.tabs.currentChanged.connect(self._render_current)
         return self.tabs
 
@@ -593,7 +638,7 @@ class MainWindow(QWidget):
     def _build_action_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setContentsMargins(0, 9, 0, 0)
-        row.addWidget(_label("차트 도구로 확대 · 이동 · 초기화", "muted"))
+        row.addWidget(_label("양쪽 축을 함께 확대 · 이동", "muted"))
         row.addStretch()
         self.save_png_button = self._button("이미지 저장", "download", "quiet")
         self.save_png_button.clicked.connect(self._save_png)
@@ -620,12 +665,9 @@ class MainWindow(QWidget):
         for index, page in enumerate(self.tab_pages):
             result = self._results.get(index)
             if result is not None:
-                if index == 4:
-                    draw_age_pyramid(page.canvas, result)
-                else:
-                    draw_line_series(page.canvas, result)
+                self._draw_result(page, result)
             else:
-                page.canvas.message("서울의 하루를 데이터로 만나보세요", "왼쪽에서 CSV 파일을 연결하면 시간대별 생활인구를 확인할 수 있어요.")
+                page.canvas.message("비교할 두 지역을 선택하세요", "CSV 파일을 연결하고 지역 A와 B를 고르면 같은 기준으로 분석합니다.")
         self._render_current()
 
     def _prefill_paths(self) -> None:
@@ -718,7 +760,7 @@ class MainWindow(QWidget):
         self.region_a.populate(codebook, population)
         self.region_b.populate(codebook, population)
         for widget in (self.search_edit, self.search_button, self.top_button,
-                       self.summary_button):
+                       self.summary_button, self.swap_button, self.search_target):
             widget.setEnabled(True)
 
         # 지역 A/B 가 같은 곳이면 비교 그래프가 의미 없으니 B는 다른 동으로 옮겨 둔다.
@@ -756,23 +798,41 @@ class MainWindow(QWidget):
             chosen = dialog.selected()
             if chosen is None:
                 return
-        self.region_a.set_dong(chosen)
-        self.status.setText(f"{chosen.label} - {chosen.code} 를 분석합니다.")
+        target = self._search_selector()
+        target.set_dong(chosen)
+        self.status.setText(f"{self.search_target.currentText()}: {chosen.label}을 선택했습니다.")
+
+    def _search_selector(self) -> RegionSelector:
+        return self.region_a if self.search_target.currentIndex() == 0 else self.region_b
 
     def _show_top_dongs(self) -> None:
         if self.population is None or self.codebook is None:
             return
         ranking = rank_by_daily_average(self.population, self.codebook, top=20)
-        dialog = TopDongDialog(ranking, self)
+        dialog = TopDongDialog(ranking, self, target=self.search_target.currentText())
         if dialog.exec_() == QDialog.Accepted:
             chosen = dialog.selected()
             if chosen is not None:
-                self.region_a.set_dong(chosen)
+                self._search_selector().set_dong(chosen)
 
     def _on_region_changed(self) -> None:
         self._results.clear()
         self._update_summary()
         self._render_current()
+
+    def _swap_regions(self) -> None:
+        dong_a, dong_b = self.region_a.current(), self.region_b.current()
+        if dong_a is None or dong_b is None:
+            return
+        self.region_a.blockSignals(True)
+        self.region_b.blockSignals(True)
+        try:
+            self.region_a.set_dong(dong_b)
+            self.region_b.set_dong(dong_a)
+        finally:
+            self.region_a.blockSignals(False)
+            self.region_b.blockSignals(False)
+        self._on_region_changed()
 
     def _hotplaces(self) -> tuple[Hotplace | None, Hotplace | None]:
         if self.population is None:
@@ -783,44 +843,41 @@ class MainWindow(QWidget):
         return place_a, place_b
 
     # ── 그리기 ───────────────────────────────────────────────────────
+    @staticmethod
+    def _draw_result(page: AnalysisTab, result: LineSeries | PairedAnalysis) -> None:
+        if isinstance(result, PairedAnalysis):
+            draw_paired_analysis(page.canvas, result)
+        else:
+            draw_line_series(page.canvas, result)
+
     def _render_current(self, *_args) -> None:
         index = self.tabs.currentIndex()
         page = self.tab_pages[index]
         place_a, place_b = self._hotplaces()
-        # 연령대 14개가 겹치지 않도록 피라미드에는 더 넉넉한 높이를 준다.
-        self.chart_panel.setMinimumHeight(580 if index == 4 and place_a else 430)
+        self.chart_panel.setMinimumHeight(560 if index == 4 else 430)
         self.save_png_button.setEnabled(False)
         self.export_csv_button.setEnabled(False)
         page.toolbar.setVisible(False)
 
-        if place_a is None:
-            page.canvas.message("서울의 하루를 데이터로 만나보세요", "왼쪽에서 CSV 파일을 연결하면 시간대별 생활인구를 확인할 수 있어요.")
+        if place_a is None or place_b is None:
+            page.canvas.message("비교할 두 지역을 선택하세요", "CSV 파일을 연결하고 지역 A와 B를 고르면 같은 기준으로 분석합니다.")
             return
 
         result = self._results.get(index)
         if result is None:
-            if index == 0:
-                result = place_a.analysis1()
-            elif index == 1:
-                result = place_a.analysis2()
-            elif index == 2:
-                result = place_a.analysis3()
-            elif index == 3:
-                if place_b is None:
-                    page.canvas.message("비교할 지역을 선택해 주세요", "왼쪽 지역 B에서 비교할 행정동을 고를 수 있어요.")
-                    return
-                if place_b.code == place_a.code:
-                    page.canvas.message("서로 다른 두 동네를 비교해 보세요", "현재 지역 A와 B가 같아요. 왼쪽에서 다른 행정동을 선택해 주세요.")
-                    return
+            if index == OVERLAY_TAB:
                 result = place_a.analysis4(place_b)
             else:
-                result = place_a.analysis5()
+                method = ("analysis1", "analysis2", "analysis3", "analysis4", "analysis5")[index]
+                result = PairedAnalysis(
+                    title=f"{place_a.label} · {place_b.label} {TAB_TITLES[index]} 비교",
+                    regions=(place_a.label, place_b.label),
+                    analyses=(getattr(place_a, method)(), getattr(place_b, method)()),
+                    note=self.population.period,
+                )
             self._results[index] = result
 
-        if index == 4:
-            draw_age_pyramid(page.canvas, result)
-        else:
-            draw_line_series(page.canvas, result)
+        self._draw_result(page, result)
         page.toolbar.setVisible(True)
         page.toolbar.update()
         self.save_png_button.setEnabled(True)
@@ -828,45 +885,41 @@ class MainWindow(QWidget):
 
     def _update_summary(self) -> None:
         place_a, place_b = self._hotplaces()
+        self.metrics_a.update_place(place_a)
+        self.metrics_b.update_place(place_b)
         self.insight_a.update_place(place_a)
         self.insight_b.update_place(place_b)
-        if place_a is None:
-            self.overview_title.setText("어느 동네가 궁금하세요?")
-            for card in self.metric_cards:
-                card.update_value("—", "분석할 지역을 선택하세요")
-            self.summary_button.setEnabled(False)
-            return
-        self.summary_button.setEnabled(True)
-        self.overview_title.setText(place_a.label)
-        summary = place_a.summary()
-        ratio = lambda value: f"{value:.2f}" if math.isfinite(value) else "—"
-        self.metric_cards[0].update_value(f"{summary['daily_avg']:,.0f}", f"{self.population.n_days}일 · 24시간 평균")
-        self.metric_cards[1].update_value(f"{summary['peak_hour']:02d}", f"최대 {summary['peak_value']:,.0f}명")
-        self.metric_cards[2].update_value(ratio(summary['day_night_ratio']), "주간 평균 ÷ 야간 평균")
-        self.metric_cards[3].update_value(ratio(summary['weekend_ratio']), "주말 평균 ÷ 평일 평균")
-        for card in self.metric_cards:
-            card.setToolTip(summary_text(place_a))
+        self.summary_button.setEnabled(place_a is not None or place_b is not None)
+        self.swap_button.setEnabled(place_a is not None and place_b is not None)
+        self.overview_title.setText("두 지역을 나란히 비교하세요")
+        same = place_a and place_b and place_a.code == place_b.code
+        self.overview_note.setText("같은 지역 선택됨 · 동일한 결과" if same else "동일 기간 · 공통 축 · 같은 지표")
 
     def _show_summary(self) -> None:
-        place_a, place_b = self._hotplaces()
-        if place_a is None:
+        places = self._hotplaces()
+        if not any(places):
             return
         dialog = QDialog(self)
-        dialog.setWindowTitle("상세 요약 통계")
-        dialog.resize(780, 580)
+        dialog.setWindowTitle("두 지역 상세 통계")
+        dialog.resize(1080, 580)
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(14)
-        layout.addWidget(_label("지역별 상세 통계", "heading"))
-        layout.addWidget(_label("혼잡 시간, 주야 격차, 평일·주말 비율과 성별 분포를 확인하세요.", "muted"))
-        summary_view = QPlainTextEdit()
-        summary_view.setReadOnly(True)
-        summary_view.setFont(_mono_font())
-        blocks = [summary_text(place_a)]
-        if place_b is not None and place_b.code != place_a.code:
-            blocks.append(summary_text(place_b))
-        summary_view.setPlainText("\n\n".join(blocks))
-        layout.addWidget(summary_view, 1)
+        layout.addWidget(_label("두 지역 상세 통계", "heading"))
+        layout.addWidget(_label("동일한 항목을 나란히 비교하세요. 텍스트를 선택해 복사할 수 있습니다.", "muted"))
+        columns = QHBoxLayout()
+        columns.setSpacing(16)
+        for index, place in enumerate(places):
+            column = QVBoxLayout()
+            column.addWidget(_label(f"지역 {'AB'[index]}", "regionTag" if index == 0 else "regionTagB"))
+            summary_view = QPlainTextEdit()
+            summary_view.setReadOnly(True)
+            summary_view.setLineWrapMode(QPlainTextEdit.NoWrap)
+            summary_view.setFont(_mono_font())
+            summary_view.setPlainText(summary_text(place) if place else "행정동을 선택해 주세요.")
+            column.addWidget(summary_view, 1)
+            columns.addLayout(column, 1)
+        layout.addLayout(columns, 1)
         layout.addWidget(_label("추정 상권 성격은 생활인구 패턴에 따른 규칙 기반 참고값입니다.", "muted"))
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
         buttons.button(QDialogButtonBox.Close).setText("닫기")

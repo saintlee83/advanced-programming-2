@@ -60,6 +60,23 @@ class AgePyramid:
         return rows
 
 
+@dataclass
+class PairedAnalysis:
+    """동일한 분석을 두 지역에 적용한 결과. 두 지역 모두 CSV에 포함한다."""
+
+    title: str
+    regions: tuple[str, str]
+    analyses: tuple[LineSeries, LineSeries] | tuple[AgePyramid, AgePyramid]
+    note: str = ""
+
+    def csv_rows(self) -> list[list[str]]:
+        left, right = (analysis.csv_rows() for analysis in self.analyses)
+        header = [left[0][0]]
+        for side, region, rows in zip(("A", "B"), self.regions, (left, right)):
+            header.extend(f"{side} · {region} · {column}" for column in rows[0][1:])
+        return [header] + [a + b[1:] for a, b in zip(left[1:], right[1:])]
+
+
 class Hotplace:
     """행정동 한 곳을 분석 대상으로 감싸는 클래스.
 
