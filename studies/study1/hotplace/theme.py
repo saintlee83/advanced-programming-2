@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from PyQt5.QtCore import QByteArray, Qt
 from PyQt5.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPalette, QPixmap
@@ -22,21 +21,29 @@ class Theme:
     axis: str
     accent: str
     accent_soft: str
+    accent_hover: str
+    accent_pressed: str
+    on_accent: str
     hover: str
     series: tuple[str, str]
+    series_soft: tuple[str, str]
 
 
 LIGHT = Theme(
-    background="#f3f6fb", surface="#ffffff", muted="#f7f9fc",
-    ink="#19273e", ink_soft="#64748b", border="#dfe6f0",
-    grid="#edf1f7", axis="#dfe6f0", accent="#2563eb",
-    accent_soft="#eaf1ff", hover="#eef3fb", series=("#2a78d6", "#eb6834"),
+    background="#f6f7fb", surface="#ffffff", muted="#f0f2f7",
+    ink="#202536", ink_soft="#737b8e", border="#e5e8f0",
+    grid="#edf0f6", axis="#dce1ec", accent="#4564e8",
+    accent_soft="#edf1ff", accent_hover="#3654d4", accent_pressed="#2b45b7",
+    on_accent="#ffffff", hover="#f0f3fc", series=("#4564e8", "#df8858"),
+    series_soft=("#edf1ff", "#fff3e9"),
 )
 DARK = Theme(
-    background="#101722", surface="#182231", muted="#1d2a3b",
-    ink="#ecf2fa", ink_soft="#a5b4c9", border="#2d3b50",
-    grid="#263448", axis="#35455d", accent="#7aabff",
-    accent_soft="#243b60", hover="#243247", series=("#68aaff", "#ff9b67"),
+    background="#15171e", surface="#1e212b", muted="#262a36",
+    ink="#edf0f8", ink_soft="#a0a8bc", border="#303644",
+    grid="#2c3140", axis="#3c4354", accent="#96aaff",
+    accent_soft="#29324f", accent_hover="#adbdff", accent_pressed="#7b94fa",
+    on_accent="#172044", hover="#2a3040", series=("#96aaff", "#efab82"),
+    series_soft=("#29324f", "#3f302a"),
 )
 
 _theme = LIGHT
@@ -63,6 +70,14 @@ _ICONS = {
     "rank": '<path d="M4 21V11h5v10m0 0V4h6v17m0 0V8h5v13M2 21h20"/>',
     "compare": '<path d="M4 7h16m-4-4 4 4-4 4M20 17H4m4-4-4 4 4 4"/>',
     "info": '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v.1"/>',
+    "calendar": '<rect x="3" y="5" width="18" height="16" rx="3"/><path d="M7 3v4m10-4v4M3 11h18m-13 4h2m4 0h2"/>',
+    "spark": '<path d="m12 3 2.3 6.7L21 12l-6.7 2.3L12 21l-2.3-6.7L3 12l6.7-2.3Z"/>',
+    "home": '<path d="m3 10 9-7 9 7M5 9v12h5v-7h4v7h5V9"/>',
+    "back": '<path d="M19 12H5m6-6-6 6 6 6"/>',
+    "pan": '<path d="M12 3v18M3 12h18m-12-6 3-3 3 3m-6 12 3 3 3-3M6 9l-3 3 3 3m12-6 3 3-3 3"/>',
+    "zoom": '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6m-3-3v6"/>',
+    "settings": '<path d="M3 6h4m4 0h10M3 12h10m4 0h4M3 18h4m4 0h10"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="9" cy="18" r="2"/>',
+    "chart": '<path d="M4 3v17h17M7 14l4-5 4 3 6-7"/>',
 }
 
 
@@ -83,93 +98,73 @@ def make_icon(name: str, color: str | None = None, size: int = 18) -> QIcon:
 
 
 def apply_theme(app, dark: bool) -> None:
-    """OS에 관계없이 일관된 컨트롤과 읽기 쉬운 밝은/어두운 팔레트."""
+    """Fluent 컴포넌트와 분석 화면을 하나의 팔레트로 갱신한다."""
+    from qfluentwidgets import Theme as FluentTheme, setTheme, setThemeColor
+
     set_theme(dark)
     t = theme()
+    setTheme(FluentTheme.DARK if dark else FluentTheme.LIGHT)
+    setThemeColor("#4564e8")
     app.setStyle("Fusion")
     families = set(QFontDatabase().families())
     family = next((name for name in (
         "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", "NanumGothic",
     ) if name in families), app.font().family())
     font = QFont(family)
-    font.setPixelSize(13)
+    font.setPixelSize(14)
     app.setFont(font)
-
     palette = QPalette()
     for role, color in (
         (QPalette.Window, t.background), (QPalette.WindowText, t.ink),
         (QPalette.Base, t.surface), (QPalette.AlternateBase, t.muted),
         (QPalette.Text, t.ink), (QPalette.Button, t.surface),
         (QPalette.ButtonText, t.ink), (QPalette.Highlight, t.accent),
-        (QPalette.HighlightedText, t.background if dark else "#ffffff"),
-        (QPalette.ToolTipBase, t.ink), (QPalette.ToolTipText, t.surface),
+        (QPalette.HighlightedText, t.on_accent),
+        (QPalette.ToolTipBase, t.surface), (QPalette.ToolTipText, t.ink),
         (QPalette.PlaceholderText, t.ink_soft),
     ):
         palette.setColor(role, QColor(color))
     for role in (QPalette.Text, QPalette.ButtonText, QPalette.WindowText):
         palette.setColor(QPalette.Disabled, role, QColor(t.ink_soft))
     app.setPalette(palette)
-    arrow = (Path(__file__).parent / "assets" / "chevron-down.svg").as_posix()
     app.setStyleSheet(f"""
-        QWidget {{ color: {t.ink}; font-size: 13px; }}
-        QWidget#mainWindow, QDialog {{ background: {t.background}; }}
-        QLabel {{ background: transparent; border: none; }}
-        QLabel[role="muted"] {{ color: {t.ink_soft}; font-size: 12px; }}
-        QLabel[role="eyebrow"] {{ color: {t.accent}; font-size: 10px; font-weight: 700; letter-spacing: 2px; }}
-        QLabel[role="title"] {{ font-size: 27px; font-weight: 700; }}
-        QLabel[role="heading"] {{ font-size: 17px; font-weight: 700; }}
-        QLabel[role="section"] {{ font-size: 14px; font-weight: 700; }}
-        QLabel[role="field"] {{ font-size: 12px; font-weight: 600; }}
-        QLabel[role="badge"] {{ color: {t.accent}; background: {t.accent_soft}; border-radius: 6px; padding: 5px 9px; font-size: 11px; font-weight: 600; }}
-        QLabel#brandMark {{ background: #2563eb; border-radius: 12px; }}
-        QFrame#sidebar, QFrame#chartPanel, QFrame[role="metric"], QFrame[role="insight"] {{
+        QWidget {{ color: {t.ink}; }}
+        QWidget#mainWindow, QWidget#workspacePage, QDialog {{ background: {t.background}; }}
+        QWidget#pageContents {{ background: transparent; }}
+        QFrame#navigationRail {{ background: {t.surface}; border-right: 1px solid {t.border}; }}
+        QFrame#topBar {{ background: {t.background}; border-bottom: 1px solid {t.border}; }}
+        QFrame#chartPanel, QFrame#metricsStrip, QFrame[role="fileCard"], QFrame#rankingPanel {{
             background: {t.surface}; border: 1px solid {t.border}; border-radius: 12px;
         }}
-        QFrame[role="metric"][featured="true"] {{ background: {t.accent_soft}; border-color: {t.accent_soft}; }}
-        QLabel[role="metricValue"] {{ font-size: 28px; font-weight: 700; letter-spacing: -1px; }}
-        QLabel[role="comparisonValue"] {{ font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }}
-        QFrame[featured="true"] QLabel[role="metricValue"] {{ color: {t.accent}; }}
-        QLabel[role="metricUnit"] {{ color: {t.ink_soft}; font-size: 12px; padding-bottom: 4px; }}
-        QLabel[role="regionTag"] {{ color: {t.accent}; font-size: 11px; font-weight: 700; }}
-        QLabel[role="regionTagB"] {{ color: {t.series[1]}; font-size: 11px; font-weight: 700; }}
-        QFrame[role="separator"] {{ background: {t.border}; border: none; max-height: 1px; }}
-        QPushButton {{ background: {t.surface}; border: 1px solid {t.border}; border-radius: 7px; padding: 8px 12px; font-weight: 600; }}
-        QPushButton:hover {{ background: {t.hover}; border-color: {t.ink_soft}; }}
-        QPushButton:pressed {{ background: {t.accent_soft}; }}
-        QPushButton:focus {{ border-color: {t.accent}; }}
-        QPushButton:disabled {{ background: {t.muted}; color: {t.ink_soft}; border-color: {t.border}; }}
-        QPushButton[role="primary"] {{ background: #2563eb; color: white; border: 1px solid #2563eb; padding: 10px 12px; }}
-        QPushButton[role="primary"]:hover {{ background: #1d4ed8; border-color: #1d4ed8; }}
-        QPushButton[role="primary"]:pressed {{ background: #1e40af; }}
-        QPushButton[role="primary"]:disabled {{ background: {t.muted}; color: {t.ink_soft}; border-color: {t.border}; }}
-        QPushButton[role="quiet"] {{ background: transparent; border: 1px solid transparent; color: {t.ink_soft}; padding: 6px 8px; }}
-        QPushButton[role="quiet"]:hover {{ background: {t.hover}; color: {t.ink}; }}
-        QPushButton[role="quiet"]:focus {{ border-color: {t.accent}; }}
-        QLineEdit, QComboBox {{ background: {t.muted}; border: 1px solid {t.border}; border-radius: 7px; padding: 9px 10px; selection-background-color: {t.accent}; }}
-        QLineEdit:focus, QComboBox:focus {{ border: 1px solid {t.accent}; background: {t.surface}; }}
-        QLineEdit:disabled, QComboBox:disabled {{ color: {t.ink_soft}; background: {t.muted}; }}
-        QComboBox {{ padding-right: 26px; }}
-        QComboBox::drop-down {{ border: none; width: 27px; }}
-        QComboBox::down-arrow {{ image: url("{arrow}"); width: 12px; height: 12px; }}
-        QComboBox QAbstractItemView {{ background: {t.surface}; border: 1px solid {t.border}; padding: 4px; selection-background-color: {t.accent_soft}; selection-color: {t.ink}; outline: none; }}
-        QTabWidget::pane {{ border: none; background: {t.surface}; }}
-        QTabBar::tab {{ background: transparent; color: {t.ink_soft}; border: none; border-bottom: 2px solid transparent; padding: 12px 14px; font-weight: 600; }}
-        QTabBar::tab:selected {{ color: {t.accent}; border-bottom-color: {t.accent}; }}
-        QTabBar::tab:hover {{ background: {t.muted}; }}
+        QFrame[role="regionSelector"] {{ background: {t.surface}; border: 1px solid {t.border}; border-radius: 10px; }}
+        QFrame[role="separator"] {{ background: {t.border}; border: none; }}
+        QFrame#insightStrip {{ background: {t.accent_soft}; border: none; border-radius: 10px; }}
+        QLabel {{ color: {t.ink}; background: transparent; border: none; }}
+        QLabel[role="brand"] {{ font-size: 25px; font-weight: 700; }}
+        QLabel[role="eyebrow"] {{ color: {t.ink_soft}; font-size: 10px; font-weight: 600; }}
+        QLabel[role="title"] {{ font-size: 30px; font-weight: 700; }}
+        QLabel[role="welcomeTitle"] {{ font-size: 38px; font-weight: 700; }}
+        QLabel[role="heading"] {{ font-size: 21px; font-weight: 700; }}
+        QLabel[role="section"] {{ font-size: 16px; font-weight: 600; }}
+        QLabel[role="field"] {{ font-size: 13px; font-weight: 600; }}
+        QLabel[role="muted"] {{ color: {t.ink_soft}; font-size: 13px; }}
+        QLabel[role="caption"] {{ color: {t.ink_soft}; font-size: 11px; }}
+        QLabel[role="metricValue"] {{ font-size: 25px; font-weight: 600; }}
+        QLabel[role="metricUnit"] {{ color: {t.ink_soft}; font-size: 11px; }}
+        QLabel[role="regionTag"] {{ color: {t.series[0]}; font-size: 12px; font-weight: 600; }}
+        QLabel[role="regionTagB"] {{ color: {t.series[1]}; font-size: 12px; font-weight: 600; }}
+        QLabel[role="regionBadge"], QLabel[role="regionBadgeB"] {{ color: {t.series[0]}; background: {t.series_soft[0]}; border-radius: 7px; font-size: 12px; font-weight: 700; }}
+        QLabel[role="regionBadgeB"] {{ color: {t.series[1]}; background: {t.series_soft[1]}; }}
+        QLabel[role="badge"] {{ color: {t.accent}; background: {t.accent_soft}; border-radius: 6px; padding: 5px 9px; font-size: 11px; }}
+        QLabel#brandMark {{ background: #4564e8; border-radius: 9px; }}
+        QLabel#chartReadout {{ color: {t.ink_soft}; font-size: 12px; }}
         QToolBar {{ background: {t.surface}; border: none; spacing: 2px; padding: 0; }}
         QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 5px; }}
         QToolButton:hover, QToolButton:checked {{ background: {t.accent_soft}; border-color: {t.border}; }}
         QToolButton:focus {{ border-color: {t.accent}; }}
-        QProgressBar {{ background: {t.muted}; border: none; border-radius: 3px; max-height: 6px; }}
-        QProgressBar::chunk {{ background: {t.accent}; border-radius: 3px; }}
         QScrollArea {{ background: transparent; border: none; }}
-        QWidget#scrollContents {{ background: transparent; }}
-        QScrollBar:vertical {{ background: transparent; width: 7px; margin: 0; }}
-        QScrollBar::handle:vertical {{ background: {t.border}; border-radius: 3px; min-height: 28px; }}
-        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-        QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: transparent; }}
-        QListWidget, QPlainTextEdit {{ background: {t.surface}; border: 1px solid {t.border}; border-radius: 8px; padding: 10px; selection-background-color: {t.accent_soft}; selection-color: {t.ink}; }}
-        QListWidget::item {{ padding: 10px 4px; border-radius: 5px; }}
+        QListWidget, QPlainTextEdit {{ background: {t.surface}; border: 1px solid {t.border}; border-radius: 8px; padding: 8px; selection-background-color: {t.accent_soft}; selection-color: {t.ink}; }}
+        QListWidget::item {{ padding: 14px 10px; border-radius: 6px; }}
         QListWidget::item:selected {{ background: {t.accent_soft}; color: {t.accent}; }}
-        QToolTip {{ background: {t.ink}; color: {t.surface}; border: none; padding: 6px 9px; }}
+        QToolTip {{ background: {t.surface}; color: {t.ink}; border: 1px solid {t.border}; padding: 6px 9px; }}
     """)

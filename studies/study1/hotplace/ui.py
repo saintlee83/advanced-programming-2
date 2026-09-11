@@ -1,68 +1,50 @@
-"""PyQt5 화면 구성.
+"""Fluent 위젯으로 구성한 서울 생활인구 분석 작업 공간.
 
-두 개의 CSV 파일을 입력받아 → 행정동을 고르고 → 분석 1~5를 탭으로 보여준다.
-무거운 CSV 읽기는 별도 스레드에서 돌려 화면이 멈추지 않게 했다.
+데이터 연결, 지역 탐색, 비교 분석을 서로 독립된 페이지로 제공한다.
+CSV 로딩과 계산·내보내기는 기존 Python 모델을 사용한다.
 """
 
 from __future__ import annotations
 
 import csv
-import math
 from pathlib import Path
 
 from PyQt5.QtCore import QObject, QSize, Qt, QThread, pyqtSignal
 from PyQt5.QtGui import QFont, QPalette
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox,
-    QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
-    QLayout, QLineEdit, QListWidget, QListWidgetItem, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QTabWidget, QVBoxLayout,
-    QWidget,
+    QAbstractButton, QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QFileDialog,
+    QFrame, QHBoxLayout, QHeaderView, QLabel, QLayout, QLineEdit, QListWidget,
+    QListWidgetItem, QMessageBox, QPlainTextEdit, QSizePolicy,
+    QStackedWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
+from qfluentwidgets import (
+    ComboBox, InfoBar, InfoBarPosition, LineEdit, PopUpAniStackedWidget,
+    PrimaryPushButton, ProgressBar, PushButton, SearchLineEdit, SmoothScrollArea,
+    TableWidget, TransparentPushButton, TransparentToolButton,
+)
 
 from .dataset import (
     CodeBook, DataError, Dong, Population, default_data_dir,
     find_population_csv, load_population,
 )
 from .hotplace import Hotplace, LineSeries, PairedAnalysis, rank_by_daily_average, summary_text
-from .plotting import PlotCanvas, draw_line_series, draw_paired_analysis, set_theme, theme
+from .plotting import draw_line_series, draw_paired_analysis, set_theme, theme
 from .theme import DARK, apply_theme, make_icon
-
-TAB_TITLES = (
-    "시간대별 추이",
-    "평일 · 주말",
-    "성별 분포",
-    "추이 겹쳐보기",
-    "연령별 분포",
+from .widgets import (
+    AnalysisTab, AnalysisTabs, CityIllustration, ComparisonMetrics, NavigationItem,
+    label as _label, region_badge, separator as _separator,
 )
+
+TAB_TITLES = ("시간대별 추이", "평일 · 주말", "성별 분포", "추이 겹쳐보기", "연령별 분포")
 OVERLAY_TAB = 3
 
 
-def _label(text: str, role: str, wrap: bool = False) -> QLabel:
-    label = QLabel(text)
-    label.setProperty("role", role)
-    label.setWordWrap(wrap)
-    return label
-
-
-def _separator() -> QFrame:
-    line = QFrame()
-    line.setProperty("role", "separator")
-    line.setFixedHeight(1)
-    return line
-
-
 def _mono_font(point_size: int = 11) -> QFont:
-    """숫자를 세로로 맞춰 읽기 위한 고정폭 폰트."""
-    font = QFont()
+    font = QFont("Menlo", point_size)
     font.setStyleHint(QFont.Monospace)
-    font.setFamily("Menlo")
-    font.setPointSize(point_size)
     return font
 
 
-# ── 백그라운드 로딩 ───────────────────────────────────────────────────
 class LoadWorker(QObject):
     """CSV 읽기를 담당하는 워커. QThread 로 옮겨서 실행한다."""
 
@@ -124,40 +106,7 @@ class DongPickDialog(QDialog):
         return self._dongs[row] if 0 <= row < len(self._dongs) else None
 
 
-class TopDongDialog(QDialog):
-    """일평균 생활인구가 많은 행정동 목록. 핫플레이스 후보를 훑어볼 때 쓴다."""
-
-    def __init__(self, ranking: list[tuple[Dong, float]], parent=None, target="지역 A") -> None:
-        super().__init__(parent)
-        self.setWindowTitle("생활인구 상위 행정동")
-        self.resize(520, 580)
-        self._ranking = ranking
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
-        layout.addWidget(_label("생활인구 TOP 20", "heading"))
-        layout.addWidget(_label(f"일평균 생활인구 기준 · 더블클릭하면 {target}로 선택됩니다.", "muted"))
-        self.list = QListWidget()
-        for rank, (dong, value) in enumerate(ranking, start=1):
-            self.list.addItem(f"{rank:02d}    {dong.label}     {value:,.0f} 명")
-        self.list.setCurrentRow(0)
-        self.list.itemDoubleClicked.connect(lambda _item: self.accept())
-        layout.addWidget(self.list)
-
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText(f"{target}로 선택")
-        buttons.button(QDialogButtonBox.Cancel).setText("취소")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def selected(self) -> Dong | None:
-        row = self.list.currentRow()
-        return self._ranking[row][0] if 0 <= row < len(self._ranking) else None
-
-
-class RegionSelector(QWidget):
+class RegionSelector(QFrame):
     """자치구 + 행정동 콤보 한 쌍."""
 
     changed = pyqtSignal()
@@ -168,22 +117,19 @@ class RegionSelector(QWidget):
         self._population: Population | None = None
         self._loading = False
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-        label = _label(caption, "regionTagB" if "B" in caption else "regionTag")
-        self.sigungu = QComboBox()
-        self.sigungu.setAccessibleName(f"{caption} 자치구")
-        self.dong = QComboBox()
-        self.dong.setAccessibleName(f"{caption} 행정동")
-        self.sigungu.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.dong.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        row = QHBoxLayout()
-        row.setSpacing(8)
-        row.addWidget(self.sigungu, 1)
-        row.addWidget(self.dong, 1)
-        layout.addWidget(label)
-        layout.addLayout(row)
+        self.setProperty("role", "regionSelector")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(10)
+        layout.addWidget(region_badge(caption))
+        self.sigungu, self.dong = ComboBox(), ComboBox()
+        for widget, text in ((self.sigungu, "자치구"), (self.dong, "행정동")):
+            widget.setFont(QApplication.font())
+            widget.setAccessibleName(f"{caption} {text}")
+            widget.setPlaceholderText(f"{text} 선택")
+            widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            widget.setMinimumWidth(88)
+            layout.addWidget(widget, 1)
 
         self.sigungu.currentIndexChanged.connect(self._on_sigungu_changed)
         self.dong.currentIndexChanged.connect(self._on_dong_changed)
@@ -209,7 +155,7 @@ class RegionSelector(QWidget):
         self.dong.clear()
         for dong in self._codebook.in_sigungu(sigungu):
             if self._population.has(dong.code):       # 인구 데이터에 있는 동만
-                self.dong.addItem(dong.name, dong)
+                self.dong.addItem(dong.name, userData=dong)
         self._loading = False
         self._on_dong_changed()
 
@@ -234,118 +180,6 @@ class RegionSelector(QWidget):
             self.dong.setCurrentIndex(target)
 
 
-class AnalysisTab(QWidget):
-    """그래프 하나를 담는 탭 (캔버스 + 확대/저장 도구모음)."""
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.canvas = PlotCanvas(self)
-        self.toolbar = NavigationToolbar2QT(self.canvas, self)
-        self.toolbar.setIconSize(QSize(16, 16))
-        self.toolbar.setMinimumHeight(32)
-        self.toolbar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.toolbar.setVisible(False)
-
-        layout = QVBoxLayout(self)
-        layout.setSpacing(0)
-        layout.setContentsMargins(0, 8, 0, 0)
-        layout.addWidget(self.canvas, 1)
-        layout.addWidget(self.toolbar)
-
-    def refresh_icons(self) -> None:
-        # matplotlib 도구모음 아이콘도 현재 팔레트에 맞춰 다시 생성한다.
-        for _text, _tooltip, image, callback in self.toolbar.toolitems:
-            if image and callback in self.toolbar._actions:
-                self.toolbar._actions[callback].setIcon(self.toolbar._icon(f"{image}.png"))
-
-
-class RegionMetricsCard(QFrame):
-    """A와 B에 동일한 크기, 지표, 글자 크기를 적용하는 요약 카드."""
-
-    def __init__(self, region: str) -> None:
-        super().__init__()
-        self.setProperty("role", "metric")
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
-        layout.setSpacing(14)
-        row = QHBoxLayout()
-        row.addWidget(_label(region, "regionTagB" if region == "지역 B" else "regionTag"))
-        self.name = _label("행정동 선택 전", "section")
-        row.addWidget(self.name)
-        row.addStretch()
-        layout.addLayout(row)
-        layout.addWidget(_separator())
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(18)
-        grid.setVerticalSpacing(12)
-        self.values: dict[str, QLabel] = {}
-        for index, (key, title, unit) in enumerate((
-            ("daily_avg", "일평균 생활인구", "명"),
-            ("peak_hour", "가장 붐비는 시간", "시"),
-            ("day_night_ratio", "주간 / 야간 인구", "배"),
-            ("weekend_ratio", "주말 / 평일 인구", "배"),
-        )):
-            cell = QVBoxLayout()
-            cell.setSpacing(4)
-            cell.addWidget(_label(title, "muted"))
-            numbers = QHBoxLayout()
-            numbers.setSpacing(5)
-            value = _label("—", "comparisonValue")
-            self.values[key] = value
-            numbers.addWidget(value)
-            numbers.addWidget(_label(unit, "metricUnit"), 0, Qt.AlignBottom)
-            numbers.addStretch()
-            cell.addLayout(numbers)
-            grid.addLayout(cell, index // 2, index % 2)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        layout.addLayout(grid)
-
-    def update_place(self, place: Hotplace | None) -> None:
-        self.name.setText(place.label if place else "행정동 선택 전")
-        if place is None:
-            for value in self.values.values():
-                value.setText("—")
-            self.setToolTip("")
-            return
-        summary = place.summary()
-        self.values["daily_avg"].setText(f"{summary['daily_avg']:,.0f}")
-        self.values["peak_hour"].setText(f"{summary['peak_hour']:02d}")
-        for key in ("day_night_ratio", "weekend_ratio"):
-            number = summary[key]
-            self.values[key].setText(f"{number:.2f}" if math.isfinite(number) else "—")
-        self.setToolTip(summary_text(place))
-
-
-class InsightCard(QFrame):
-    def __init__(self, region: str) -> None:
-        super().__init__()
-        self.setProperty("role", "insight")
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 13, 16, 13)
-        layout.setSpacing(5)
-        row = QHBoxLayout()
-        row.addWidget(_label(region, "regionTagB" if "B" in region else "regionTag"))
-        self.name = _label("행정동 선택 전", "field")
-        row.addWidget(self.name)
-        row.addStretch()
-        layout.addLayout(row)
-        self.character = _label("지역을 선택하면 생활인구 패턴을 요약합니다.", "muted", True)
-        layout.addWidget(self.character)
-
-    def update_place(self, place: Hotplace | None) -> None:
-        if place is None:
-            self.name.setText("행정동 선택 전")
-            self.character.setText("지역을 선택하면 생활인구 패턴을 요약합니다.")
-            return
-        summary = place.summary()
-        self.name.setText(place.label)
-        self.character.setText(str(summary["character"]))
-        self.setToolTip(summary_text(place))
-
-
-# ── 메인 윈도우 ───────────────────────────────────────────────────────
 class MainWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -354,310 +188,404 @@ class MainWindow(QWidget):
         self._thread: QThread | None = None
         self._worker: LoadWorker | None = None
         self._results: dict[int, LineSeries | PairedAnalysis] = {}
-
         self._build_ui()
         self._prefill_paths()
 
-    # ── 화면 구성 ────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         self.setObjectName("mainWindow")
-        self.setWindowTitle("서울 생활인구 분석기 — Hotplace Analyzer")
-        self.resize(1440, 960)
+        self.setWindowTitle("Hotplace — 서울 생활인구 분석")
+        self.resize(1480, 960)
         self.setMinimumSize(1080, 740)
-        self._icon_buttons: list[tuple[QPushButton, str, bool]] = []
+        self._icon_buttons = []
         apply_theme(QApplication.instance(), theme() is DARK)
-
-        root = QVBoxLayout(self)
-        root.setContentsMargins(26, 22, 26, 14)
-        root.setSpacing(20)
-        root.addLayout(self._build_header())
-
-        body = QHBoxLayout()
-        body.setSpacing(22)
-        sidebar = QFrame()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(300)
-        sidebar_layout = QVBoxLayout(sidebar)
-        sidebar_layout.setContentsMargins(0, 0, 0, 0)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        contents = QWidget()
-        contents.setObjectName("scrollContents")
-        controls = QVBoxLayout(contents)
-        controls.setContentsMargins(20, 22, 20, 20)
-        controls.setSpacing(23)
-        controls.addWidget(self._build_file_group())
-        controls.addWidget(_separator())
-        controls.addWidget(self._build_region_group())
-        controls.addStretch()
-        scroll.setWidget(contents)
-        sidebar_layout.addWidget(scroll)
-        body.addWidget(sidebar)
-
-        dashboard = QWidget()
-        dashboard.setObjectName("scrollContents")
-        main = QVBoxLayout(dashboard)
-        main.setContentsMargins(0, 0, 0, 0)
-        main.setSizeConstraint(QLayout.SetMinimumSize)
-        main.setSpacing(16)
-        main.addLayout(self._build_overview())
-        metrics = QHBoxLayout()
-        metrics.setSpacing(12)
-        self.metrics_a = RegionMetricsCard("지역 A")
-        self.metrics_b = RegionMetricsCard("지역 B")
-        metrics.addWidget(self.metrics_a, 1)
-        metrics.addWidget(self.metrics_b, 1)
-        main.addLayout(metrics)
-        main.addWidget(self._build_chart_panel(), 1)
-        main.addWidget(self._build_summary_group())
-        dashboard_scroll = QScrollArea()
-        self.dashboard_scroll = dashboard_scroll
-        dashboard_scroll.setWidgetResizable(True)
-        dashboard_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        dashboard_scroll.setWidget(dashboard)
-        body.addWidget(dashboard_scroll, 1)
-        root.addLayout(body, 1)
-
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(self._build_navigation())
+        workspace = QVBoxLayout()
+        workspace.setContentsMargins(0, 0, 0, 0)
+        workspace.setSpacing(0)
+        workspace.addWidget(self._build_topbar())
+        self.workspace_stack = PopUpAniStackedWidget()
+        self.workspace_stack.addWidget(self._build_analysis_page(), deltaY=16)
+        self.workspace_stack.addWidget(self._build_explore_page(), deltaY=16)
+        self.workspace_stack.addWidget(self._build_data_page(), deltaY=16)
+        workspace.addWidget(self.workspace_stack, 1)
         footer = QHBoxLayout()
-        footer.setSpacing(8)
-        self.status_dot = _label("●", "regionTag")
-        footer.addWidget(self.status_dot)
-        self.status = _label("데이터 파일을 확인한 뒤 ‘데이터 불러오기’를 눌러 시작하세요.", "muted")
-        self.status.setWordWrap(True)
+        footer.setContentsMargins(32, 8, 32, 12)
+        self.status = _label("CSV 파일을 연결하면 분석을 시작할 수 있습니다.", "caption", True)
         footer.addWidget(self.status, 1)
-        footer.addWidget(_label("HOTPLACE ANALYZER", "muted"))
-        root.addLayout(footer)
+        footer.addWidget(_label("SEOUL LIVING POPULATION", "eyebrow"))
+        workspace.addLayout(footer)
+        root.addLayout(workspace, 1)
         self._refresh_theme_controls()
-        self.load_button.setFocus()
+        self._show_page(0)
 
-    def _button(self, text: str, icon: str, role: str = "") -> QPushButton:
-        button = QPushButton(text)
-        button.setCursor(Qt.PointingHandCursor)
+    def _button(self, text: str, icon: str, role: str = "") -> QAbstractButton:
+        cls = PrimaryPushButton if role == "primary" else TransparentPushButton if role == "quiet" else PushButton
+        button = cls(text) if text else TransparentToolButton()
+        button.setFont(QApplication.font())
         button.setIconSize(QSize(16, 16))
-        if role:
-            button.setProperty("role", role)
+        button.setMinimumHeight(34)
+        button.setCursor(Qt.PointingHandCursor)
         self._icon_buttons.append((button, icon, role == "primary"))
         return button
 
-    def _build_header(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setSpacing(14)
+    def _build_navigation(self) -> QFrame:
+        rail = QFrame()
+        rail.setObjectName("navigationRail")
+        rail.setFixedWidth(204)
+        layout = QVBoxLayout(rail)
+        layout.setContentsMargins(16, 28, 16, 22)
+        layout.setSpacing(8)
+        brand = QHBoxLayout()
+        brand.setContentsMargins(8, 0, 0, 0)
+        brand.setSpacing(9)
         mark = QLabel()
         mark.setObjectName("brandMark")
-        mark.setFixedSize(48, 48)
+        mark.setFixedSize(31, 31)
         mark.setAlignment(Qt.AlignCenter)
-        mark.setPixmap(make_icon("pulse", "#ffffff", 28).pixmap(QSize(28, 28)))
-        row.addWidget(mark)
-        titles = QVBoxLayout()
-        titles.setSpacing(3)
-        titles.addWidget(_label("서울 생활인구 분석", "title"))
-        titles.addWidget(_label("시간과 지역으로 살펴보는 도시의 흐름", "muted"))
-        row.addLayout(titles)
-        row.addStretch()
-        self.data_badge = _label("데이터 연결 대기", "badge")
-        row.addWidget(self.data_badge, 0, Qt.AlignVCenter)
-        self.theme_button = self._button("", "moon", "quiet")
+        mark.setPixmap(make_icon("pulse", "#ffffff", 19).pixmap(QSize(19, 19)))
+        brand.addWidget(mark)
+        brand.addWidget(_label("hotplace", "brand"))
+        brand.addStretch()
+        layout.addLayout(brand)
+        subtitle = _label("서울 생활인구 데이터 스튜디오", "caption")
+        subtitle.setContentsMargins(8, 4, 0, 0)
+        layout.addWidget(subtitle)
+        layout.addSpacing(34)
+        eyebrow = _label("WORKSPACE", "eyebrow")
+        eyebrow.setContentsMargins(12, 0, 0, 8)
+        layout.addWidget(eyebrow)
+        self.nav_items = []
+        for index, (title, icon) in enumerate((("비교 분석", "chart"), ("지역 탐색", "search"), ("데이터 연결", "folder"))):
+            button = NavigationItem(make_icon(icon), title)
+            button.clicked.connect(lambda _checked=False, i=index: self._show_page(i))
+            layout.addWidget(button)
+            self.nav_items.append((button, icon))
+        layout.addStretch()
+        layout.addWidget(_separator())
+        layout.addSpacing(10)
+        self.theme_button = self._button("어두운 테마", "moon", "quiet")
         self.theme_button.clicked.connect(self._toggle_theme)
-        row.addWidget(self.theme_button)
-        return row
+        layout.addWidget(self.theme_button)
+        caption = _label("시간과 지역으로 읽는\n도시의 새로운 표정", "caption", True)
+        caption.setContentsMargins(12, 12, 0, 0)
+        layout.addWidget(caption)
+        return rail
 
-    def _build_overview(self) -> QVBoxLayout:
-        layout = QVBoxLayout()
-        layout.setSpacing(5)
-        row = QHBoxLayout()
-        row.addWidget(_label("REGION COMPARISON", "eyebrow"))
-        row.addStretch()
+    def _build_topbar(self) -> QFrame:
+        bar = QFrame()
+        bar.setObjectName("topBar")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(32, 16, 32, 16)
+        layout.setSpacing(12)
+        layout.addWidget(_label("워크스페이스", "muted"))
+        layout.addWidget(_label("/", "caption"))
+        self.breadcrumb = _label("비교 분석", "field")
+        layout.addWidget(self.breadcrumb)
+        layout.addStretch()
+        self.data_badge = _label("○  데이터 연결 전", "badge")
+        layout.addWidget(self.data_badge)
+        return bar
+
+    def _scroll_page(self, contents: QWidget) -> SmoothScrollArea:
+        contents.setObjectName("pageContents")
+        scroll = SmoothScrollArea()
+        scroll.setObjectName("workspacePage")
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setWidget(contents)
+        return scroll
+
+    def _show_page(self, index: int) -> None:
+        self.workspace_stack.setCurrentIndex(index, duration=200)
+        self.breadcrumb.setText(("비교 분석", "지역 탐색", "데이터 연결")[index])
+        for i, (item, _icon) in enumerate(self.nav_items):
+            item.setSelected(i == index)
+
+    def _build_analysis_page(self) -> QStackedWidget:
+        self.analysis_state = QStackedWidget()
+        self.analysis_state.addWidget(self._build_welcome())
+        dashboard = QWidget()
+        main = QVBoxLayout(dashboard)
+        main.setContentsMargins(32, 26, 32, 12)
+        main.setSpacing(18)
+        main.setSizeConstraint(QLayout.SetMinimumSize)
+        heading = QHBoxLayout()
+        titles = QVBoxLayout()
+        titles.setSpacing(5)
+        self.overview_title = _label("지역 비교", "title")
+        self.overview_note = _label("서로 다른 두 지역의 하루를 같은 기준으로 살펴보세요.", "muted")
+        titles.addWidget(self.overview_title)
+        titles.addWidget(self.overview_note)
+        heading.addLayout(titles)
+        heading.addStretch()
         self.period_label = _label("분석 기간 —", "muted")
-        row.addWidget(self.period_label)
-        layout.addLayout(row)
-        row = QHBoxLayout()
-        self.overview_title = _label("두 지역을 나란히 비교하세요", "heading")
-        row.addWidget(self.overview_title)
-        row.addStretch()
-        self.overview_note = _label("동일 기간 · 공통 축 · 같은 지표", "muted")
-        row.addWidget(self.overview_note)
-        layout.addLayout(row)
-        return layout
+        heading.addWidget(self.period_label, 0, Qt.AlignVCenter)
+        main.addLayout(heading)
 
-    def _build_file_group(self) -> QWidget:
-        group = QWidget()
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-        heading = QHBoxLayout()
-        heading.addWidget(_label("01", "badge"))
-        heading.addWidget(_label("데이터 연결", "section"))
-        heading.addStretch()
-        layout.addLayout(heading)
-        layout.addWidget(_label("분석할 CSV 파일 2개를 선택하세요.", "muted"))
-        self.population_edit = QLineEdit()
-        self.population_edit.setPlaceholderText("생활인구 CSV 파일")
-        self.code_edit = QLineEdit()
-        self.code_edit.setPlaceholderText("행정동 코드 CSV 파일")
-        self.file_buttons = []
-        for caption, edit in (("생활인구 데이터", self.population_edit), ("행정동 코드표", self.code_edit)):
-            label = _label(caption, "field")
-            label.setBuddy(edit)
-            edit.setAccessibleName(caption + " 파일 경로")
-            edit.textChanged.connect(lambda value, field=edit: self._update_path_hint(field, value))
-            layout.addWidget(label)
-            row = QHBoxLayout()
-            row.setSpacing(6)
-            row.addWidget(edit, 1)
-            button = self._button("", "folder")
-            button.setFixedSize(36, 36)
-            button.setToolTip(caption + " 찾아보기")
-            button.setAccessibleName(caption + " 찾아보기")
-            button.clicked.connect(lambda _checked=False, field=edit, name=caption: self._pick_file(field, name + " 파일 선택"))
-            self.file_buttons.append(button)
-            row.addWidget(button)
-            layout.addLayout(row)
-        self.load_button = self._button("데이터 불러오기", "arrow", "primary")
-        self.load_button.setDefault(True)
-        self.load_button.clicked.connect(self.start_load)
-        layout.addWidget(self.load_button)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setTextVisible(False)
-        self.progress.hide()
-        layout.addWidget(self.progress)
-        return group
-
-    @staticmethod
-    def _update_path_hint(field: QLineEdit, value: str) -> None:
-        field.setToolTip(value)
-        # 좁은 패널에서는 경로의 마지막에 있는 파일 이름을 우선 보여준다.
-        if not field.hasFocus():
-            field.setCursorPosition(len(value))
-            field.deselect()
-
-    def _build_region_group(self) -> QWidget:
-        group = QWidget()
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(15)
-        heading = QHBoxLayout()
-        heading.addWidget(_label("02", "badge"))
-        heading.addWidget(_label("지역 탐색", "section"))
-        heading.addStretch()
-        layout.addLayout(heading)
+        selectors = QHBoxLayout()
+        selectors.setSpacing(12)
         self.region_a = RegionSelector("지역 A")
         self.region_b = RegionSelector("지역 B")
         self.region_a.changed.connect(self._on_region_changed)
         self.region_b.changed.connect(self._on_region_changed)
-        layout.addWidget(self.region_a)
-        layout.addWidget(self.region_b)
-        self.swap_button = self._button("지역 A ↔ B 서로 바꾸기", "compare")
+        selectors.addWidget(self.region_a, 1)
+        self.swap_button = self._button("", "compare", "quiet")
+        self.swap_button.setFixedSize(36, 36)
+        self.swap_button.setToolTip("지역 A와 B 바꾸기")
+        self.swap_button.setAccessibleName("지역 A와 B 바꾸기")
         self.swap_button.setEnabled(False)
         self.swap_button.clicked.connect(self._swap_regions)
-        layout.addWidget(self.swap_button)
-        layout.addWidget(_label("모든 탭에서 두 지역을 같은 기준으로 분석합니다.", "muted", True))
-        target_row = QHBoxLayout()
-        target_row.addWidget(_label("검색 · 순위 선택 대상", "field"))
-        self.search_target = QComboBox()
-        self.search_target.addItems(["지역 A", "지역 B"])
-        self.search_target.setAccessibleName("검색 및 순위로 선택할 지역")
-        target_row.addWidget(self.search_target, 1)
-        layout.addLayout(target_row)
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("행정동 검색 · 예: 역삼1동")
-        self.search_edit.setAccessibleName("행정동명 검색")
-        self.search_edit.returnPressed.connect(self._search_dong)
-        self.search_button = self._button("", "search")
-        self.search_button.setFixedSize(36, 36)
-        self.search_button.setToolTip("행정동 검색")
-        self.search_button.setAccessibleName("행정동 검색")
-        self.search_button.clicked.connect(self._search_dong)
-        search_row = QHBoxLayout()
-        search_row.setSpacing(6)
-        search_row.addWidget(self.search_edit, 1)
-        search_row.addWidget(self.search_button)
-        layout.addLayout(search_row)
-        self.top_button = self._button("생활인구 TOP 20", "rank")
-        self.top_button.clicked.connect(self._show_top_dongs)
-        layout.addWidget(self.top_button)
-        layout.addWidget(_label("지역을 바꾸면 분석이 바로 업데이트됩니다.", "muted", True))
-        for widget in (self.search_edit, self.search_button, self.top_button, self.search_target):
-            widget.setEnabled(False)
-        return group
+        selectors.addWidget(self.swap_button)
+        selectors.addWidget(self.region_b, 1)
+        self.top_button = self._button("지역 찾기", "search")
+        self.top_button.setEnabled(False)
+        self.top_button.clicked.connect(lambda: self._show_page(1))
+        selectors.addWidget(self.top_button)
+        main.addLayout(selectors)
+
+        metrics = ComparisonMetrics()
+        self.metrics_a, self.metrics_b = metrics.region_a, metrics.region_b
+        main.addWidget(metrics)
+        main.addWidget(self._build_chart_panel(), 1)
+        main.addWidget(self._build_insights())
+        self.dashboard_scroll = self._scroll_page(dashboard)
+        self.analysis_state.addWidget(self.dashboard_scroll)
+        return self.analysis_state
+
+    def _build_welcome(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(48, 32, 48, 32)
+        layout.setSpacing(16)
+        layout.addStretch()
+        self.city_art = CityIllustration()
+        layout.addWidget(self.city_art, 0, Qt.AlignHCenter)
+        eyebrow = _label("DISCOVER THE RHYTHM OF SEOUL", "eyebrow")
+        layout.addWidget(eyebrow, 0, Qt.AlignHCenter)
+        layout.addWidget(_label("서울의 하루, 지역의 차이", "welcomeTitle"), 0, Qt.AlignHCenter)
+        note = _label("두 지역의 생활인구를 나란히 비교하고,\n시간·요일·성별·연령에 담긴 패턴을 발견하세요.", "muted", True)
+        note.setAlignment(Qt.AlignCenter)
+        layout.addWidget(note)
+        layout.addSpacing(10)
+        self.connect_button = self._button("데이터 연결하고 시작하기", "arrow", "primary")
+        self.connect_button.setMinimumHeight(42)
+        self.connect_button.clicked.connect(lambda: self._show_page(2))
+        layout.addWidget(self.connect_button, 0, Qt.AlignHCenter)
+        layout.addWidget(_label("생활인구 CSV + 행정동 코드표로 시작합니다.", "caption"), 0, Qt.AlignHCenter)
+        layout.addStretch()
+        layout.addStretch()
+        return page
 
     def _build_chart_panel(self) -> QFrame:
-        panel = QFrame()
-        self.chart_panel = panel
-        panel.setObjectName("chartPanel")
-        panel.setMinimumHeight(430)
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(18, 8, 18, 12)
-        layout.setSpacing(0)
-        layout.addWidget(self._build_tabs(), 1)
-        layout.addWidget(_separator())
-        layout.addLayout(self._build_action_row())
-        return panel
-
-    def _build_tabs(self) -> QTabWidget:
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        self.tabs.tabBar().setExpanding(False)
-        self.tabs.tabBar().setDrawBase(False)
-        self.tab_pages = []
-        for title in TAB_TITLES:
-            page = AnalysisTab()
-            page.canvas.message("비교할 두 지역을 선택하세요", "CSV 파일을 연결하고 지역 A와 B를 고르면 같은 기준으로 분석합니다.")
-            self.tabs.addTab(page, title)
-            self.tab_pages.append(page)
-        for index in range(len(TAB_TITLES)):
-            self.tabs.setTabToolTip(index, "지역 A와 B를 같은 축 범위로 비교합니다.")
-        self.tabs.setTabToolTip(OVERLAY_TAB, "두 지역의 시간대별 생활인구를 하나의 그래프에 겹쳐 봅니다.")
+        self.chart_panel = QFrame()
+        self.chart_panel.setObjectName("chartPanel")
+        layout = QVBoxLayout(self.chart_panel)
+        layout.setContentsMargins(22, 18, 22, 14)
+        layout.setSpacing(12)
+        heading = QHBoxLayout()
+        self.chart_title = _label("시간대별 생활인구", "section")
+        heading.addWidget(self.chart_title)
+        heading.addStretch()
+        self.save_png_button = self._button("이미지 저장", "download", "quiet")
+        self.save_png_button.clicked.connect(self._save_png)
+        self.export_csv_button = self._button("CSV 내보내기", "export")
+        self.export_csv_button.clicked.connect(self._export_csv)
+        for button in (self.save_png_button, self.export_csv_button):
+            button.setEnabled(False)
+            heading.addWidget(button)
+        layout.addLayout(heading)
+        self.tabs = AnalysisTabs(TAB_TITLES)
+        self.tab_pages = self.tabs.pages
         self.tabs.currentChanged.connect(self._render_current)
-        return self.tabs
+        layout.addWidget(self.tabs, 1)
+        return self.chart_panel
 
-    def _build_summary_group(self) -> QWidget:
-        group = QWidget()
-        layout = QVBoxLayout(group)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(9)
-        row = QHBoxLayout()
-        row.addWidget(_label("지역 인사이트", "section"))
-        row.addWidget(_label("생활인구 패턴에 따른 참고 지표", "muted"))
-        row.addStretch()
+    def _build_insights(self) -> QFrame:
+        panel = QFrame()
+        panel.setObjectName("insightStrip")
+        row = QHBoxLayout(panel)
+        row.setContentsMargins(16, 10, 12, 10)
+        row.setSpacing(14)
+        self.insight_icon = QLabel()
+        self.insight_icon.setFixedSize(18, 18)
+        row.addWidget(self.insight_icon)
+        row.addWidget(_label("지역 인사이트", "field"))
+        self.insight_a = _label("—", "muted", True)
+        self.insight_b = _label("—", "muted", True)
+        row.addWidget(self.insight_a, 1)
+        row.addWidget(self.insight_b, 1)
         self.summary_button = self._button("상세 통계", "info", "quiet")
         self.summary_button.setEnabled(False)
         self.summary_button.clicked.connect(self._show_summary)
         row.addWidget(self.summary_button)
-        layout.addLayout(row)
-        cards = QHBoxLayout()
-        cards.setSpacing(12)
-        self.insight_a = InsightCard("지역 A")
-        self.insight_b = InsightCard("지역 B")
-        cards.addWidget(self.insight_a, 1)
-        cards.addWidget(self.insight_b, 1)
-        layout.addLayout(cards)
-        return group
+        return panel
 
-    def _build_action_row(self) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 9, 0, 0)
-        row.addWidget(_label("양쪽 축을 함께 확대 · 이동", "muted"))
-        row.addStretch()
-        self.save_png_button = self._button("이미지 저장", "download", "quiet")
-        self.save_png_button.clicked.connect(self._save_png)
-        self.export_csv_button = self._button("CSV 내보내기", "export", "quiet")
-        self.export_csv_button.clicked.connect(self._export_csv)
-        for button in (self.save_png_button, self.export_csv_button):
-            button.setEnabled(False)
+    def _build_explore_page(self) -> SmoothScrollArea:
+        contents = QWidget()
+        layout = QVBoxLayout(contents)
+        layout.setContentsMargins(32, 28, 32, 24)
+        layout.setSpacing(20)
+        layout.addWidget(_label("지역 탐색", "title"))
+        layout.addWidget(_label("궁금한 행정동을 검색하거나, 생활인구가 많은 지역부터 살펴보세요.", "muted", True))
+        search = QHBoxLayout()
+        search.setSpacing(12)
+        self.search_edit = SearchLineEdit()
+        self.search_edit.setFont(QApplication.font())
+        self.search_edit.setPlaceholderText("행정동 검색 · 예: 역삼1동, 서교동")
+        self.search_edit.setAccessibleName("행정동명 검색")
+        self.search_edit.setMinimumHeight(40)
+        self.search_edit.searchSignal.connect(lambda _text: self._search_dong())
+        self.search_button = self.search_edit.searchButton
+        self.search_button.setAccessibleName("행정동 검색")
+        search.addWidget(self.search_edit, 1)
+        search.addWidget(_label("선택할 지역", "muted"))
+        self.search_target = ComboBox()
+        self.search_target.setFont(QApplication.font())
+        self.search_target.addItems(["지역 A", "지역 B"])
+        self.search_target.setAccessibleName("검색 및 순위로 선택할 지역")
+        self.search_target.setFixedWidth(120)
+        search.addWidget(self.search_target)
+        layout.addLayout(search)
+        panel = QFrame()
+        panel.setObjectName("rankingPanel")
+        ranking = QVBoxLayout(panel)
+        ranking.setContentsMargins(22, 20, 22, 16)
+        ranking.setSpacing(14)
+        heading = QHBoxLayout()
+        heading.addWidget(_label("생활인구 TOP 20", "section"))
+        heading.addStretch()
+        self.ranking_caption = _label("데이터 연결 후 순위가 표시됩니다.", "caption")
+        heading.addWidget(self.ranking_caption)
+        ranking.addLayout(heading)
+        self.rank_table = TableWidget()
+        self.rank_table.setColumnCount(4)
+        self.rank_table.setHorizontalHeaderLabels(["순위", "자치구", "행정동", "일평균 생활인구"])
+        self.rank_table.verticalHeader().hide()
+        self.rank_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.rank_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.rank_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.rank_table.setColumnWidth(0, 70)
+        self.rank_table.setColumnWidth(1, 160)
+        self.rank_table.setColumnWidth(3, 190)
+        self.rank_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.rank_table.setMinimumHeight(340)
+        self.rank_table.cellDoubleClicked.connect(lambda row, _column: self._choose_rank(row))
+        ranking.addWidget(self.rank_table, 1)
+        actions = QHBoxLayout()
+        actions.addWidget(_label("행을 두 번 클릭하거나 선택 후 버튼을 눌러 비교에 추가하세요.", "caption", True), 1)
+        self.rank_select_button = self._button("선택한 지역 비교하기", "arrow", "primary")
+        self.rank_select_button.setEnabled(False)
+        self.rank_select_button.clicked.connect(lambda: self._choose_rank(self.rank_table.currentRow()))
+        actions.addWidget(self.rank_select_button)
+        ranking.addLayout(actions)
+        layout.addWidget(panel, 1)
+        for widget in (self.search_edit, self.search_target):
+            widget.setEnabled(False)
+        return self._scroll_page(contents)
+
+    def _refresh_ranking(self) -> None:
+        ranking = rank_by_daily_average(self.population, self.codebook, top=20)
+        self.rank_table.setRowCount(len(ranking))
+        for row, (dong, value) in enumerate(ranking):
+            for column, text in enumerate((f"{row + 1:02d}", dong.sigungu, dong.name, f"{value:,.0f} 명")):
+                item = QTableWidgetItem(text)
+                item.setData(Qt.UserRole, dong)
+                if column == 3:
+                    item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                self.rank_table.setItem(row, column, item)
+            self.rank_table.setRowHeight(row, 48)
+        self.ranking_caption.setText(f"{len(self.population.aggregates):,}개 행정동 중 일평균 인구 기준")
+        self.rank_select_button.setEnabled(bool(ranking))
+        if ranking:
+            self.rank_table.selectRow(0)
+
+    def _choose_rank(self, row: int) -> None:
+        item = self.rank_table.item(row, 0)
+        if item is None:
+            return
+        dong = item.data(Qt.UserRole)
+        self._search_selector().set_dong(dong)
+        self.status.setText(f"{self.search_target.currentText()}: {dong.label}을 선택했습니다.")
+        self._show_page(0)
+
+    def _build_data_page(self) -> SmoothScrollArea:
+        contents = QWidget()
+        layout = QVBoxLayout(contents)
+        layout.setContentsMargins(40, 34, 40, 32)
+        layout.setSpacing(18)
+        layout.addWidget(_label("데이터 연결", "title"))
+        layout.addWidget(_label("서울 생활인구 데이터와 행정동 코드표를 연결하세요.", "muted", True))
+        layout.addSpacing(10)
+        self.population_edit, self.code_edit = LineEdit(), LineEdit()
+        self.file_buttons = []
+        for number, title, note, edit in (
+            ("01", "생활인구 데이터", "날짜·시간·행정동별 인구가 담긴 LOCAL_PEOPLE_DONG CSV", self.population_edit),
+            ("02", "행정동 코드표", "행정동 코드와 지역명을 연결하는 dong_code CSV", self.code_edit),
+        ):
+            card = QFrame()
+            card.setProperty("role", "fileCard")
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(24, 22, 24, 22)
+            card_layout.setSpacing(12)
+            heading = QHBoxLayout()
+            heading.addWidget(_label(number, "badge"))
+            heading.addWidget(_label(title, "section"))
+            heading.addStretch()
+            card_layout.addLayout(heading)
+            card_layout.addWidget(_label(note, "muted", True))
+            row = QHBoxLayout()
+            edit.setFont(QApplication.font())
+            edit.setMinimumHeight(38)
+            edit.setPlaceholderText("CSV 파일을 선택하거나 경로를 입력하세요.")
+            edit.setAccessibleName(title + " 파일 경로")
+            edit.textChanged.connect(lambda text, field=edit: self._update_path_hint(field, text))
+            row.addWidget(edit, 1)
+            button = self._button("파일 선택", "folder")
+            button.setAccessibleName(title + " 찾아보기")
+            button.clicked.connect(lambda _checked=False, field=edit, name=title: self._pick_file(field, name + " 파일 선택"))
+            self.file_buttons.append(button)
             row.addWidget(button)
-        return row
+            card_layout.addLayout(row)
+            layout.addWidget(card)
+        self.progress = ProgressBar()
+        self.progress.setTextVisible(False)
+        self.progress.hide()
+        layout.addWidget(self.progress)
+        self.data_summary = _label("두 파일을 불러오면 지역 선택과 5가지 비교 분석을 사용할 수 있습니다.", "muted", True)
+        layout.addWidget(self.data_summary)
+        actions = QHBoxLayout()
+        self.load_button = self._button("데이터 불러오기", "arrow", "primary")
+        self.load_button.setMinimumHeight(42)
+        self.load_button.clicked.connect(self.start_load)
+        actions.addWidget(self.load_button)
+        actions.addStretch()
+        layout.addLayout(actions)
+        layout.addStretch()
+        return self._scroll_page(contents)
+
+    @staticmethod
+    def _update_path_hint(field: QLineEdit, value: str) -> None:
+        field.setToolTip(value)
+        if not field.hasFocus():
+            field.setCursorPosition(len(value))
+            field.deselect()
 
     def _refresh_theme_controls(self) -> None:
         for button, icon, primary in self._icon_buttons:
-            button.setIcon(make_icon(icon, "#ffffff" if primary else theme().ink_soft))
+            button.setIcon(make_icon(icon, theme().on_accent if primary else theme().ink_soft))
         dark = theme() is DARK
-        self.theme_button.setText("밝은 모드" if dark else "어두운 모드")
+        self.theme_button.setText("밝은 테마" if dark else "어두운 테마")
         self.theme_button.setIcon(make_icon("sun" if dark else "moon"))
-        self.theme_button.setToolTip("밝은 화면으로 전환" if dark else "어두운 화면으로 전환")
+        self.theme_button.setAccessibleName(self.theme_button.text())
+        self.insight_icon.setPixmap(make_icon("spark", theme().accent, 18).pixmap(QSize(18, 18)))
+        for item, icon in self.nav_items:
+            item.setIcon(make_icon(icon))
         for page in self.tab_pages:
             page.refresh_icons()
+        self.city_art.update()
 
     def _toggle_theme(self) -> None:
         apply_theme(QApplication.instance(), theme() is not DARK)
@@ -666,9 +594,8 @@ class MainWindow(QWidget):
             result = self._results.get(index)
             if result is not None:
                 self._draw_result(page, result)
-            else:
-                page.canvas.message("비교할 두 지역을 선택하세요", "CSV 파일을 연결하고 지역 A와 B를 고르면 같은 기준으로 분석합니다.")
-        self._render_current()
+        if self.population:
+            self._render_current()
 
     def _prefill_paths(self) -> None:
         """기본 데이터 폴더를 찾아 경로 칸을 미리 채운다."""
@@ -705,7 +632,7 @@ class MainWindow(QWidget):
 
         self.load_button.setEnabled(False)
         self.load_button.setText("데이터 불러오는 중…")
-        self.data_badge.setText("데이터 연결 중")
+        self.data_badge.setText("◌  데이터 연결 중")
         self.status.setText("CSV 파일을 확인하고 있습니다…")
         for widget in (self.population_edit, self.code_edit, *self.file_buttons):
             widget.setEnabled(False)
@@ -741,17 +668,18 @@ class MainWindow(QWidget):
 
     def _on_failed(self, message: str) -> None:
         self.progress.hide()
-        self.data_badge.setText("연결 실패 · 다시 시도")
+        self.data_badge.setText("!  연결 실패 · 다시 시도")
         self.status.setText(f"오류: {message}")
         self._finish_thread()
         QMessageBox.critical(self, "데이터 오류", message)
 
     def _on_loaded(self, population: Population, codebook: CodeBook) -> None:
+        was_loading = self._thread is not None
         self.progress.hide()
         self._finish_thread()
         self.population = population
         self.codebook = codebook
-        self.data_badge.setText(f"{len(population.aggregates):,}개 행정동 연결됨")
+        self.data_badge.setText(f"●  {len(population.aggregates):,}개 행정동 연결됨")
         self.period_label.setText(population.period.replace("-", ".").replace(" ~ ", " — "))
         self.load_button.setText("데이터 다시 불러오기")
 
@@ -775,7 +703,17 @@ class MainWindow(QWidget):
             f"{len(population.aggregates)}개 행정동 · {population.period} "
             f"(평일 {population.n_weekday}일 / 주말 {population.n_weekend}일) 준비 완료"
         )
+        self.data_summary.setText(
+            f"{len(population.aggregates):,}개 행정동 · {population.period} · "
+            f"평일 {population.n_weekday}일 / 주말 {population.n_weekend}일 연결 완료"
+        )
+        self._refresh_ranking()
+        self.analysis_state.setCurrentIndex(1)
         self._on_region_changed()
+        self._show_page(0)
+        if was_loading:
+            InfoBar.success("데이터 연결 완료", "비교할 두 지역을 선택하세요.",
+                            duration=2500, position=InfoBarPosition.TOP_RIGHT, parent=self)
 
     # ── 행정동 선택 ──────────────────────────────────────────────────
     def _search_dong(self) -> None:
@@ -801,19 +739,10 @@ class MainWindow(QWidget):
         target = self._search_selector()
         target.set_dong(chosen)
         self.status.setText(f"{self.search_target.currentText()}: {chosen.label}을 선택했습니다.")
+        self._show_page(0)
 
     def _search_selector(self) -> RegionSelector:
         return self.region_a if self.search_target.currentIndex() == 0 else self.region_b
-
-    def _show_top_dongs(self) -> None:
-        if self.population is None or self.codebook is None:
-            return
-        ranking = rank_by_daily_average(self.population, self.codebook, top=20)
-        dialog = TopDongDialog(ranking, self, target=self.search_target.currentText())
-        if dialog.exec_() == QDialog.Accepted:
-            chosen = dialog.selected()
-            if chosen is not None:
-                self._search_selector().set_dong(chosen)
 
     def _on_region_changed(self) -> None:
         self._results.clear()
@@ -846,15 +775,16 @@ class MainWindow(QWidget):
     @staticmethod
     def _draw_result(page: AnalysisTab, result: LineSeries | PairedAnalysis) -> None:
         if isinstance(result, PairedAnalysis):
-            draw_paired_analysis(page.canvas, result)
+            draw_paired_analysis(page.canvas, result, show_caption=False)
         else:
-            draw_line_series(page.canvas, result)
+            draw_line_series(page.canvas, result, show_heading=False)
 
     def _render_current(self, *_args) -> None:
         index = self.tabs.currentIndex()
         page = self.tab_pages[index]
         place_a, place_b = self._hotplaces()
-        self.chart_panel.setMinimumHeight(560 if index == 4 else 430)
+        self.chart_panel.setMinimumHeight(520 if index == 4 else 420)
+        self.chart_title.setText(("시간대별 생활인구", "평일과 주말의 차이", "성별 생활인구", "두 지역의 하루", "연령별 인구 구조")[index])
         self.save_png_button.setEnabled(False)
         self.export_csv_button.setEnabled(False)
         page.toolbar.setVisible(False)
@@ -878,6 +808,8 @@ class MainWindow(QWidget):
             self._results[index] = result
 
         self._draw_result(page, result)
+        if index == 4:
+            page.readout.setText("남자 인구는 왼쪽, 여자 인구는 오른쪽 · 두 지역에 같은 축 적용")
         page.toolbar.setVisible(True)
         page.toolbar.update()
         self.save_png_button.setEnabled(True)
@@ -887,13 +819,13 @@ class MainWindow(QWidget):
         place_a, place_b = self._hotplaces()
         self.metrics_a.update_place(place_a)
         self.metrics_b.update_place(place_b)
-        self.insight_a.update_place(place_a)
-        self.insight_b.update_place(place_b)
+        for index, (place, field) in enumerate(((place_a, self.insight_a), (place_b, self.insight_b))):
+            field.setText(f"{'AB'[index]} · {place.name}  {place.summary()['character']}" if place else "—")
         self.summary_button.setEnabled(place_a is not None or place_b is not None)
         self.swap_button.setEnabled(place_a is not None and place_b is not None)
-        self.overview_title.setText("두 지역을 나란히 비교하세요")
         same = place_a and place_b and place_a.code == place_b.code
-        self.overview_note.setText("같은 지역 선택됨 · 동일한 결과" if same else "동일 기간 · 공통 축 · 같은 지표")
+        self.overview_note.setText("같은 지역을 선택했습니다. 두 결과가 동일합니다." if same
+                                   else "서로 다른 두 지역의 하루를 같은 기준으로 살펴보세요.")
 
     def _show_summary(self) -> None:
         places = self._hotplaces()
@@ -938,7 +870,9 @@ class MainWindow(QWidget):
         path, _ = QFileDialog.getSaveFileName(self, "그래프 저장", default, "PNG 이미지 (*.png)")
         if not path:
             return
-        self.tab_pages[index].canvas.figure.savefig(path, dpi=200, facecolor=theme().surface)
+        canvas = self.tab_pages[index].canvas
+        canvas.clear_hover()
+        canvas.figure.savefig(path, dpi=200, facecolor=theme().surface)
         self.status.setText(f"그래프를 저장했습니다: {path}")
 
     def _export_csv(self) -> None:

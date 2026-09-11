@@ -11,7 +11,7 @@ import matplotlib
 matplotlib.use("QtAgg")
 
 import matplotlib.patheffects as path_effects
-from PyQt5.QtCore import QSize
+from PyQt5.QtCore import QSize, pyqtSignal
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch
@@ -64,21 +64,70 @@ def _thousands(value, _pos=None) -> str:
 class PlotCanvas(FigureCanvasQTAgg):
     """Qt 위젯으로 쓰는 matplotlib 캔버스."""
 
+    hovered = pyqtSignal(str)
+
     def __init__(self, parent=None, width=7.4, height=4.4, dpi=110) -> None:
         configure_matplotlib()
         self.figure = Figure(figsize=(width, height), dpi=dpi, facecolor=theme().surface)
         super().__init__(self.figure)
         self.setParent(parent)
         self.setMinimumHeight(250)
+        self._hover_data = []
+        self._hover_lines = []
+        self._hover_hour = None
+        self.mpl_connect("motion_notify_event", self._on_hover)
+        self.mpl_connect("figure_leave_event", lambda _event: self.clear_hover())
 
     def sizeHint(self) -> QSize:
         # FigureCanvas의 기본 힌트는 현재 크기를 반환한다. 스크롤 영역에서는
         # 창을 줄여도 예전 높이를 요구하므로 안정된 선호 크기를 제공한다.
-        return QSize(640, 280)
+        return QSize(800, 320)
 
     def clear(self) -> None:
+        self._hover_data = []
+        self._hover_lines = []
+        self._hover_hour = None
+        self.hovered.emit("")
         self.figure.clear()
         self.figure.set_facecolor(theme().surface)   # 테마가 바뀌었을 수 있다
+
+    def set_hover_series(self, entries) -> None:
+        """양쪽 그래프에서 같은 시간의 실제 값을 함께 읽는다."""
+        self._hover_data = entries
+        self._hover_lines = [
+            ax.axvline(0, color=theme().ink_soft, linewidth=0.8,
+                       linestyle=(0, (3, 4)), visible=False, zorder=8)
+            for ax, _series, _name in entries
+        ]
+
+    def _on_hover(self, event) -> None:
+        if event.inaxes not in [entry[0] for entry in self._hover_data] or self.widgetlock.locked():
+            self.clear_hover()
+            return
+        if event.xdata is None:
+            return
+        hour = max(0, min(23, round(event.xdata)))
+        if hour == self._hover_hour:
+            return
+        self._hover_hour = hour
+        values = [f"{hour:02d}시"]
+        for (_ax, series, name), line in zip(self._hover_data, self._hover_lines):
+            line.set_xdata([hour, hour])
+            line.set_visible(True)
+            for caption, numbers in zip(series.labels, series.values):
+                prefix = name if len(series.values) == 1 else f"{name} {caption}"
+                values.append(f"{prefix} {numbers[hour]:,.0f}명")
+        self.hovered.emit("   ·   ".join(values))
+        self.draw_idle()
+
+    def clear_hover(self) -> None:
+        if self._hover_hour is None:
+            return
+        self._hover_hour = None
+        for line in self._hover_lines:
+            line.set_visible(False)
+        self.hovered.emit("")
+        self.draw_idle()
 
     def message(self, text: str, detail: str = "") -> None:
         """그래프 대신 안내 문구만 보여준다."""
@@ -89,11 +138,16 @@ class PlotCanvas(FigureCanvasQTAgg):
         ax.axis("off")
         # 빈 화면도 분석 화면과 같은 시각 언어를 사용한다. 실제 데이터와
         # 혼동할 수 있는 샘플 그래프 대신 작은 추상 막대 아이콘을 그린다.
+        ax.add_patch(FancyBboxPatch(
+            (0.422, 0.58), 0.156, 0.28,
+            boxstyle="round,pad=0.012,rounding_size=0.04",
+            transform=ax.transAxes, facecolor=theme().accent_soft, edgecolor="none",
+        ))
         for x, height in ((0.452, 0.07), (0.484, 0.13), (0.516, 0.10), (0.548, 0.17)):
             ax.add_patch(FancyBboxPatch(
                 (x - 0.01, 0.62), 0.018, height,
                 boxstyle="round,pad=0.001,rounding_size=0.008",
-                transform=ax.transAxes, facecolor=theme().accent, alpha=0.65,
+                transform=ax.transAxes, facecolor=theme().accent, alpha=0.85,
                 edgecolor="none",
             ))
         ax.text(0.5, 0.45, text, ha="center", va="center",
@@ -106,7 +160,7 @@ class PlotCanvas(FigureCanvasQTAgg):
 
 def _style_axes(ax) -> None:
     ax.set_facecolor(theme().surface)
-    ax.grid(True, axis="y", color=theme().grid, linewidth=0.8, linestyle="-")
+    ax.grid(True, axis="y", color=theme().grid, linewidth=0.7, linestyle=(0, (3, 4)))
     ax.set_axisbelow(True)
     for side in ("top", "right", "left"):
         ax.spines[side].set_visible(False)
@@ -118,7 +172,7 @@ def _style_axes(ax) -> None:
 
 def draw_line_series(canvas: PlotCanvas, series: LineSeries, *, ax=None,
                      title: str | None = None, compact: bool = False,
-                     single_color: str | None = None) -> None:
+                     single_color: str | None = None, show_heading: bool = True) -> None:
     """시간대별 꺾은선 그래프. 계열은 최대 2개를 전제로 한다."""
     standalone = ax is None
     if standalone:
@@ -131,7 +185,7 @@ def draw_line_series(canvas: PlotCanvas, series: LineSeries, *, ax=None,
         color = theme().series[i % len(theme().series)]
         if len(series.values) == 1 and single_color:
             color = single_color
-        ax.plot(hours, values, label=label, color=color, linewidth=2.3,
+        ax.plot(hours, values, label=label, color=color, linewidth=2.5,
                 linestyle="-" if i == 0 else (0, (5, 3)),
                 solid_capstyle="round", zorder=3 + i)
 
@@ -152,9 +206,10 @@ def draw_line_series(canvas: PlotCanvas, series: LineSeries, *, ax=None,
             path_effects=_halo(),
         )
 
-    ax.set_title(title or series.title, fontsize=10.5 if compact else 12,
-                 fontweight="bold", color=theme().ink, pad=18 if compact else 30, loc="left")
-    if series.note and not compact:
+    if show_heading:
+        ax.set_title(title or series.title, fontsize=10.5 if compact else 12,
+                     fontweight="bold", color=theme().ink, pad=18 if compact else 30, loc="left")
+    if series.note and not compact and show_heading:
         ax.text(0, 1.045, series.note, transform=ax.transAxes,
                 fontsize=8.5, color=theme().ink_soft, va="bottom")
 
@@ -169,7 +224,7 @@ def draw_line_series(canvas: PlotCanvas, series: LineSeries, *, ax=None,
     ax.set_ylim(lo - span * 0.14, hi + span * 0.16)
     if len(series.values) == 1:
         ax.fill_between(hours, series.values[0], 0 if compact else lo - span * 0.14,
-                        color=single_color or theme().series[0], alpha=0.065, zorder=2)
+                        color=single_color or theme().series[0], alpha=0.08, zorder=2)
     ax.xaxis.set_major_locator(MultipleLocator(1))
     ax.set_xticks([0, 4, 8, 12, 16, 20, 23] if compact else hours)
     ax.yaxis.set_major_formatter(FuncFormatter(_thousands))
@@ -185,6 +240,8 @@ def draw_line_series(canvas: PlotCanvas, series: LineSeries, *, ax=None,
             text.set_color(theme().ink_soft)
 
     if standalone:
+        if hasattr(canvas, "set_hover_series"):
+            canvas.set_hover_series([(ax, series, "")])
         canvas.figure.set_layout_engine("tight", pad=1.8)
         canvas.draw_idle()
 
@@ -197,7 +254,7 @@ def draw_age_pyramid(canvas: PlotCanvas, pyramid: AgePyramid, *, ax=None,
         canvas.clear()
         ax = canvas.figure.add_subplot(111)
     ax.set_facecolor(theme().surface)
-    ax.grid(True, axis="x", color=theme().grid, linewidth=0.8, linestyle="-")
+    ax.grid(True, axis="x", color=theme().grid, linewidth=0.7, linestyle=(0, (3, 4)))
     ax.set_axisbelow(True)
     for side in ("top", "right", "left"):
         ax.spines[side].set_visible(False)
@@ -206,9 +263,9 @@ def draw_age_pyramid(canvas: PlotCanvas, pyramid: AgePyramid, *, ax=None,
     ax.tick_params(colors=theme().ink_soft, labelsize=8.5, length=0)
 
     positions = list(range(len(pyramid.bands)))
-    ax.barh(positions, [-m for m in pyramid.male], height=0.72,
+    ax.barh(positions, [-m for m in pyramid.male], height=0.62,
             color=theme().series[0], label="남자", zorder=3)
-    ax.barh(positions, pyramid.female, height=0.72,
+    ax.barh(positions, pyramid.female, height=0.62,
             color=theme().series[1], label="여자", zorder=3)
 
     ax.axvline(0, color=theme().surface, linewidth=2, zorder=4)   # 두 막대 사이 2px 여백
@@ -255,12 +312,13 @@ def draw_age_pyramid(canvas: PlotCanvas, pyramid: AgePyramid, *, ax=None,
         canvas.draw_idle()
 
 
-def draw_paired_analysis(canvas: PlotCanvas, comparison: PairedAnalysis) -> None:
+def draw_paired_analysis(canvas: PlotCanvas, comparison: PairedAnalysis, *, show_caption: bool = True) -> None:
     """동일한 크기와 공통 축으로 두 지역을 비교한다."""
     canvas.clear()
     axes = canvas.figure.subplots(1, 2, sharex=True, sharey=True)
     caption = comparison.analyses[0].title.removeprefix(comparison.regions[0]).strip()
-    canvas.figure.suptitle(f"{caption} · {comparison.note}", fontsize=9, color=theme().ink_soft)
+    if show_caption:
+        canvas.figure.suptitle(f"{caption} · {comparison.note}", fontsize=9, color=theme().ink_soft)
     is_age = isinstance(comparison.analyses[0], AgePyramid)
     for index, (ax, region, result) in enumerate(zip(axes, comparison.regions, comparison.analyses)):
         caption = f"{'AB'[index]} · {region}"
@@ -280,6 +338,8 @@ def draw_paired_analysis(canvas: PlotCanvas, comparison: PairedAnalysis) -> None
     else:
         peak = max(max(values) for result in comparison.analyses for values in result.values)
         axes[0].set_ylim(0, (peak or 1.0) * 1.2)
+        canvas.set_hover_series([(ax, result, "AB"[index])
+                                 for index, (ax, result) in enumerate(zip(axes, comparison.analyses))])
 
     canvas.figure.set_layout_engine("tight", pad=1.4, w_pad=2.4)
     canvas.draw_idle()
