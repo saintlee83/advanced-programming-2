@@ -1,0 +1,6 @@
+# 집계 결과 캐시 (원본 CSV에서 언제든 다시 만들 수 있음)
+.cache/
+__pycache__/
+*.pyc
+build/
+dist/
