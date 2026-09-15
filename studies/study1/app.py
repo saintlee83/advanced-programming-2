@@ -12,8 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-# matplotlib 이 Qt 바인딩을 고를 때 PyQt5 를 쓰도록 못 박는다.
-os.environ.setdefault("QT_API", "pyqt5")
+# matplotlib 이 Qt 바인딩을 고를 때 PySide6 를 쓰도록 못 박는다.
+os.environ.setdefault("QT_API", "pyside6")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -41,9 +41,9 @@ def resolve_paths(args) -> tuple[str, str]:
 
 
 def run_check(args) -> int:
-    """GUI 없이 데이터 로딩과 분석 1~5를 한 번씩 실행해 본다."""
-    from hotplace.hotplace import Hotplace, rank_by_daily_average, summary_text
-    from hotplace.plotting import PlotCanvas  # noqa: F401  (폰트 설정 확인용)
+    """GUI 없이 데이터 로딩과 분석 1~14를 한 번씩 실행해 본다."""
+    from hotplace.hotplace import Hotplace, PairedAnalysis, rank_by_daily_average, summary_text
+    from hotplace.analytics import report_text
     from hotplace.plotting import configure_matplotlib, theme
 
     population_csv, code_csv = resolve_paths(args)
@@ -70,27 +70,44 @@ def run_check(args) -> int:
         print(f"  {rank}. {dong.label:<14s} {value:>12,.0f} 명")
     print()
 
-    matches = codebook.search(args.check) if args.check else []
+    matches = [dong for dong in codebook.search(args.check) if population.has(dong.code)] if args.check else []
+    if args.check and not matches:
+        print(f"분석할 지역을 찾을 수 없습니다: {args.check}")
+        return 1
     dong_a = matches[0] if matches else ranking[0][0]
-    dong_b = next(d for d, _ in ranking if d.code != dong_a.code)
+    dong_b = next((d for d, _ in ranking if d.code != dong_a.code), dong_a)
     place_a, place_b = Hotplace(dong_a, population), Hotplace(dong_b, population)
 
     print(summary_text(place_a))
     print()
 
+    regions = (place_a.label, place_b.label)
     results = {
         "analysis1": place_a.analysis1(),
         "analysis2": place_a.analysis2(),
         "analysis3": place_a.analysis3(),
         "analysis4": place_a.analysis4(place_b),
         "analysis5": place_a.analysis5(),
+        "analysis6": place_a.analysis6(),
+        "analysis7": PairedAnalysis("요일 × 시간대 비교", regions, (place_a.analysis7(), place_b.analysis7())),
+        "analysis8": place_a.analysis8(place_b),
+        "analysis9": place_a.analysis9(place_b),
+        "analysis10": PairedAnalysis("요일별 평균 비교", regions, (place_a.analysis10(), place_b.analysis10())),
+        "analysis11": PairedAnalysis("시간대별 여성 비율 비교", regions, (place_a.analysis11(), place_b.analysis11())),
+        "analysis12": place_a.analysis12(place_b),
+        "analysis13": PairedAnalysis("시간대별 연령 구성 비교", regions, (place_a.analysis13(), place_b.analysis13())),
+        "analysis14": place_a.analysis14(place_b, codebook),
     }
     for name, result in results.items():
         print(f"  {name}: {result.title}")
 
+    quality = population.quality(codebook)
+    print(f"\n관측 완전성 {quality['coverage']:.1%} · 누락 {quality['missing']:,}개 · 중복 제외 {quality['duplicates']:,}행")
+    print("\n" + report_text(place_a, place_b, codebook))
+
     if args.out:
         from matplotlib.figure import Figure
-        from hotplace.plotting import draw_age_pyramid, draw_line_series
+        from hotplace.plotting import draw_result
 
         class _Fig:                       # 캔버스 없이 Figure 만 쓰는 얇은 껍데기
             def __init__(self):
@@ -102,15 +119,12 @@ def run_check(args) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         for name, result in results.items():
             holder = _Fig()
-            if name == "analysis5":
-                draw_age_pyramid(holder, result)
-            else:
-                draw_line_series(holder, result)
+            draw_result(holder, result)
             path = out_dir / f"{name}.png"
             holder.figure.savefig(path, dpi=160, facecolor=theme().surface)
             print(f"  저장: {path}")
 
-    print("\n분석 1~5 정상 동작 확인.")
+    print("\n분석 1~14 정상 동작 확인.")
     return 0
 
 
@@ -127,7 +141,7 @@ def main() -> int:
         return run_check(args)
 
     from hotplace.ui import run
-    return run()
+    return run(args.population, args.codes)
 
 
 if __name__ == "__main__":

@@ -15,8 +15,10 @@ from __future__ import annotations
 import csv
 import datetime
 import hashlib
+import math
 import os
 import pickle
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,8 +39,10 @@ N_BANDS = len(AGE_BANDS)        # 14
 N_AGE_COLS = N_BANDS * 2        # 남 14 + 여 14 = 28
 HOURS = 24
 
-CACHE_VERSION = 3
-CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache"
+CACHE_VERSION = 4
+CACHE_DIR = (Path.home() / "Library" / "Caches" / "Hotplace"
+             if getattr(sys, "frozen", False) and sys.platform == "darwin"
+             else Path(__file__).resolve().parent.parent / ".cache")
 
 
 class DataError(Exception):
@@ -89,6 +93,8 @@ class CodeBook:
                     )
         except FileNotFoundError as exc:
             raise DataError(f"행정동 코드 파일을 찾을 수 없습니다: {path}") from exc
+        except (OSError, UnicodeError) as exc:
+            raise DataError(f"행정동 코드 파일을 읽을 수 없습니다: {exc}") from exc
         except (ValueError, IndexError, StopIteration) as exc:
             raise DataError(f"행정동 코드 파일 형식이 올바르지 않습니다: {exc}") from exc
 
@@ -104,8 +110,11 @@ class CodeBook:
 
     def search(self, name: str) -> list[Dong]:
         """행정동명으로 검색. '신사동'처럼 여러 구에 있는 이름은 모두 돌려준다."""
-        key = name.strip()
-        return [d for d in self._dongs if d.name == key]
+        key = name.strip().casefold()
+        if not key:
+            return []
+        exact = [d for d in self._dongs if d.name.casefold() == key or str(d.code) == key]
+        return exact or [d for d in self._dongs if key in d.label.casefold()]
 
     def sigungu_list(self) -> list[str]:
         return sorted({d.sigungu for d in self._dongs})
@@ -133,6 +142,11 @@ class DongAggregate:
     age: list[list[float]] = field(
         default_factory=lambda: [[0.0] * N_AGE_COLS for _ in range(HOURS)]
     )
+    # Compact date/hour observations support trends and distinguish missing from zero.
+    daily: dict[str, dict[int, float]] = field(default_factory=dict)
+    counts: list[int] = field(default_factory=lambda: [0] * HOURS)
+    weekday_counts: list[int] = field(default_factory=lambda: [0] * HOURS)
+    weekend_counts: list[int] = field(default_factory=lambda: [0] * HOURS)
 
 
 class Population:
@@ -144,6 +158,7 @@ class Population:
         dates: set[str],
         weekday_dates: set[str],
         source: str = "",
+        duplicate_rows: int = 0,
     ) -> None:
         self.aggregates = aggregates
         self.dates = dates
@@ -151,6 +166,25 @@ class Population:
         self.n_weekday = len(weekday_dates)
         self.n_weekend = self.n_days - self.n_weekday
         self.source = source
+        self.duplicate_rows = duplicate_rows
+
+    @property
+    def calendar_dates(self) -> list[str]:
+        if not self.dates:
+            return []
+        start = datetime.datetime.strptime(min(self.dates), "%Y%m%d").date()
+        end = datetime.datetime.strptime(max(self.dates), "%Y%m%d").date()
+        return [(start + datetime.timedelta(days=i)).strftime("%Y%m%d")
+                for i in range((end - start).days + 1)]
+
+    def quality(self, codebook: CodeBook) -> dict[str, int | float]:
+        observed = sum(sum(rec.counts) for rec in self.aggregates.values())
+        expected = len(self.aggregates) * len(self.calendar_dates) * HOURS
+        return {"observed": observed, "expected": expected,
+                "coverage": observed / expected if expected else 0.0,
+                "missing": max(0, expected - observed),
+                "duplicates": self.duplicate_rows,
+                "unmatched": sum(codebook.by_code(code) is None for code in self.aggregates)}
 
     @property
     def period(self) -> str:
@@ -194,7 +228,7 @@ def _cache_path(population_csv: Path, code_csv: Path) -> Path:
     parts = []
     for p in (population_csv, code_csv):
         st = p.stat()
-        parts.append(f"{p.resolve()}|{st.st_size}|{int(st.st_mtime)}")
+        parts.append(f"{p.resolve()}|{st.st_size}|{st.st_mtime_ns}")
     key = hashlib.sha1("||".join(parts).encode()).hexdigest()[:16]
     return CACHE_DIR / f"agg-v{CACHE_VERSION}-{key}.pickle"
 
@@ -204,6 +238,7 @@ def load_population(
     code_csv: str | os.PathLike,
     progress=None,
     use_cache: bool = True,
+    cancelled=None,
 ) -> tuple[Population, CodeBook]:
     """인구 파일과 코드 파일을 읽어 :class:`Population` 과 :class:`CodeBook` 을 만든다.
 
@@ -212,9 +247,9 @@ def load_population(
         use_cache: True면 이전 집계 결과를 재사용한다.
     """
     pop_path, code_path = Path(population_csv), Path(code_csv)
-    if not pop_path.exists():
+    if not pop_path.is_file():
         raise DataError(f"인구 데이터 파일을 찾을 수 없습니다: {pop_path}")
-    if not code_path.exists():
+    if not code_path.is_file():
         raise DataError(f"행정동 코드 파일을 찾을 수 없습니다: {code_path}")
 
     def report(pct: int, msg: str) -> None:
@@ -241,6 +276,8 @@ def load_population(
     dates: set[str] = set()
     weekday_dates: set[str] = set()
     weekend_flag: dict[str, bool] = {}
+    duplicate_rows = 0
+    line_no = 1
 
     try:
         with open(pop_path, encoding="utf-8-sig", newline="") as f:
@@ -252,11 +289,23 @@ def load_population(
                 )
 
             for line_no, row in enumerate(reader, start=2):
+                if cancelled and cancelled():
+                    raise DataError("데이터 불러오기를 취소했습니다.")
+                if not row or not any(value.strip() for value in row):
+                    continue
                 if len(row) < COL_END:
-                    continue                     # 파일 끝의 빈 줄 등
-                date = row[COL_DATE]
+                    raise DataError(f"{line_no}행: 인구 데이터의 열 개수가 부족합니다.")
+                date = row[COL_DATE].strip()
+                if len(date) != 8 or not date.isdigit():
+                    raise DataError(f"{line_no}행: 날짜는 YYYYMMDD 형식이어야 합니다.")
                 hour = int(row[COL_HOUR])
                 code = int(row[COL_CODE])
+                if not 0 <= hour < HOURS:
+                    raise DataError(f"{line_no}행: 시간대는 0~23이어야 합니다.")
+                total = float(row[COL_TOTAL])
+                age_values = list(map(float, row[COL_MALE:COL_END]))
+                if any(not math.isfinite(v) or v < 0 for v in [total, *age_values]):
+                    raise DataError(f"{line_no}행: 인구는 유한한 0 이상의 숫자여야 합니다.")
 
                 is_weekend = weekend_flag.get(date)
                 if is_weekend is None:
@@ -269,16 +318,23 @@ def load_population(
                 if rec is None:
                     rec = aggregates[code] = DongAggregate(code=code)
 
-                total = float(row[COL_TOTAL])
+                daily = rec.daily.setdefault(date, {})
+                if hour in daily:
+                    duplicate_rows += 1
+                    continue  # One observation per date/hour/dong; retain the first.
+                daily[hour] = total
+                rec.counts[hour] += 1
                 rec.total[hour] += total
                 if is_weekend:
                     rec.weekend[hour] += total
+                    rec.weekend_counts[hour] += 1
                 else:
                     rec.weekday[hour] += total
+                    rec.weekday_counts[hour] += 1
 
                 bucket = rec.age[hour]
                 bucket[:] = [
-                    a + v for a, v in zip(bucket, map(float, row[COL_MALE:COL_END]))
+                    a + v for a, v in zip(bucket, age_values)
                 ]
 
                 if line_no % 20000 == 0:
@@ -286,17 +342,22 @@ def load_population(
                     report(pct, f"인구 데이터 {line_no:,}행 처리 중...")
     except UnicodeDecodeError as exc:
         raise DataError(f"인구 데이터 인코딩을 읽을 수 없습니다(UTF-8 아님): {exc}") from exc
-    except ValueError as exc:
-        raise DataError(f"인구 데이터에 숫자로 바꿀 수 없는 값이 있습니다: {exc}") from exc
+    except (ValueError, StopIteration) as exc:
+        raise DataError(f"{line_no}행: 인구 데이터의 날짜 또는 숫자가 올바르지 않습니다: {exc}") from exc
+    except OSError as exc:
+        raise DataError(f"인구 데이터 파일을 읽을 수 없습니다: {exc}") from exc
 
     if not aggregates:
         raise DataError("인구 데이터에서 읽어들인 행이 없습니다.")
+    if not any(codebook.by_code(code) for code in aggregates):
+        raise DataError("인구 데이터와 코드표에 일치하는 행정동 코드가 없습니다.")
 
     population = Population(
         aggregates=aggregates,
         dates=dates,
         weekday_dates=weekday_dates,
         source=str(pop_path),
+        duplicate_rows=duplicate_rows,
     )
 
     if cache_file is not None:
@@ -324,6 +385,11 @@ def default_data_dir() -> Path | None:
 
     here = Path(__file__).resolve()
     repo_root = here.parents[3]                   # .../advanced-programming-2
+    if getattr(sys, "frozen", False):
+        # A development bundle can still discover data next to its source repository.
+        repo_root = next((parent for parent in Path(sys.executable).parents
+                          if (parent / "pyproject.toml").is_file()
+                          and (parent / "studies" / "study1").is_dir()), repo_root)
     candidates = [
         repo_root / "data",
         repo_root.parent / "Univ_Programming1" / "Lectures" / "midterm" / "data",

@@ -4,19 +4,22 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PyQt5.QtCore import Qt
-from PyQt5.QtWidgets import QApplication
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
+from PySide6.QtTest import QTest
 from matplotlib.backend_bases import MouseEvent
 
-from hotplace.dataset import CodeBook, Dong, DongAggregate, Population
+from hotplace.dataset import CodeBook, DataError, Dong, DongAggregate, Population
 from hotplace.hotplace import PairedAnalysis
-from hotplace.ui import MainWindow, OVERLAY_TAB
+from hotplace.ui import CITY_TAB, MainWindow, OVERLAY_TAB
 
 
 class ComparisonTests(unittest.TestCase):
@@ -163,11 +166,146 @@ class ComparisonTests(unittest.TestCase):
 
     def test_small_workspace_pages_have_no_horizontal_overflow(self):
         self.window.resize(1080, 740)
-        for index in range(3):
+        for index in range(4):
             self.window._show_page(index)
             self.settle()
             scroll = self.window.dashboard_scroll if index == 0 else self.window.workspace_stack.widget(index)
             self.assertLessEqual(scroll.widget().width(), scroll.viewport().width())
+
+    def test_new_analyses_export_and_render_missing_observations(self):
+        for index, rows, columns in ((5, 3, 5), (6, 8, 49), (7, 25, 3)):
+            with self.subTest(tab=index):
+                self.window.tabs.setCurrentIndex(index)
+                self.settle()
+                result = self.window._results[index]
+                exported = result.csv_rows()
+                self.assertEqual(len(exported), rows)
+                self.assertTrue(all(len(row) == columns for row in exported))
+                self.assertIn(self.dongs[0].label, " ".join(exported[0]))
+                self.assertIn(self.dongs[1].label, " ".join(exported[0]))
+                canvas = self.window.tab_pages[index].canvas
+                canvas.draw()
+                if index == 6:
+                    left, right = canvas.figure.axes[:2]
+                    self.assertEqual(left.images[0].get_clim(), right.images[0].get_clim())
+
+    def test_added_comparisons_export_and_render(self):
+        for index, rows, columns in ((8, 25, 4), (9, 8, 3), (10, 25, 3), (11, 15, 4), (12, 15, 49), (13, 4, 4)):
+            with self.subTest(tab=index):
+                self.window.tabs.setCurrentIndex(index)
+                self.settle()
+                exported = self.window._results[index].csv_rows()
+                self.assertEqual(len(exported), rows)
+                self.assertTrue(all(len(row) == columns for row in exported))
+                text = " ".join(" ".join(row) for row in exported[:4] if index == CITY_TAB) or " ".join(exported[0])
+                for dong in self.dongs[:2]:
+                    self.assertIn(dong.label, text)
+                self.window.tab_pages[index].canvas.draw()
+                self.assertTrue(self.window.export_csv_button.isEnabled())
+
+    def test_two_level_tabs_remember_the_chart_in_each_group(self):
+        tabs = self.window.tabs
+        tabs.setCurrentIndex(8)
+        tabs.setCurrentIndex(12)
+        self.settle()
+        self.assertEqual(tabs.segmented.currentRouteKey(), "group-2")
+        self.assertEqual(tabs.subtabs.currentIndex(), 2)
+        self.assertEqual(tabs.pivots[2].currentRouteKey(), "tab-12")
+        tabs.segmented.widget("group-0").click()
+        self.settle()
+        self.assertEqual(tabs.currentIndex(), 8)
+        self.assertEqual(tabs.pivots[0].currentRouteKey(), "tab-8")
+        self.assertEqual(self.window.chart_title.text(), "시간대별 인구 차이 (A − B)")
+
+    def test_gap_and_city_hover_readouts(self):
+        self.window.tabs.setCurrentIndex(8)
+        self.settle()
+        page = self.window.tab_pages[8]
+        page.canvas.draw()
+        ax = page.canvas.figure.axes[0]
+        x, y = ax.transData.transform((12, 0))
+        page.canvas.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", page.canvas, x, y))
+        gap = self.window._results[8]
+        self.assertIn(f"차이 {gap.gap[12]:+,.0f}명", page.readout.text())
+
+        self.window.tabs.setCurrentIndex(CITY_TAB)
+        self.settle()
+        page = self.window.tab_pages[CITY_TAB]
+        page.canvas.draw()
+        scatter = self.window._results[CITY_TAB]
+        ax = page.canvas.figure.axes[0]
+        point = scatter.marks.index("B")
+        x, y = ax.transData.transform((scatter.day_night[point], scatter.weekend[point]))
+        page.canvas.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", page.canvas, x, y))
+        self.assertIn(f"B · {self.dongs[1].label}", page.readout.text())
+
+    def test_rapid_navigation_and_reduced_motion_settle(self):
+        for index in (3, 2, 1, 3, 0):
+            self.window._show_page(index)
+        for index in (7, 1, 6, 0):
+            self.window.tabs.setCurrentIndex(index)
+        QTest.qWait(450)
+        self.assertEqual(self.window.workspace_stack.currentIndex(), 0)
+        self.assertEqual(self.window.tabs.currentIndex(), 0)
+        self.assertFalse(self.window.workspace_stack.overlay.isVisible())
+        self.assertFalse(self.window.tabs.stack.overlay.isVisible())
+        self.window._toggle_motion(True)
+        self.window._show_page(3)
+        self.assertFalse(self.window.workspace_stack.overlay.isVisible())
+        self.window._toggle_motion(False)
+
+    def test_insight_report_and_theme_switch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "report.txt"
+            with patch("hotplace.ui.QFileDialog.getSaveFileName", return_value=(str(path), "TXT")):
+                self.window._export_report()
+            report = path.read_text()
+            for dong in self.dongs[:2]:
+                self.assertIn(dong.label, report)
+            self.assertIn("상관계수", report)
+        self.window.tabs.setCurrentIndex(6)
+        self.window._toggle_theme()
+        self.settle()
+        self.window._toggle_theme()
+        self.assertEqual(self.window.tabs.currentIndex(), 6)
+
+    def test_failed_background_reload_preserves_analysis(self):
+        previous = self.window.population
+        self.window.population_edit.setText("population.csv")
+        self.window.code_edit.setText("codes.csv")
+        with patch("hotplace.ui.load_population", side_effect=DataError("bad data")), \
+             patch("hotplace.ui.QMessageBox.critical") as error:
+            self.window.start_load()
+            for _ in range(100):
+                QTest.qWait(10)
+                if self.window._thread is None:
+                    break
+            self.assertIsNone(self.window._thread)
+            error.assert_called_once()
+        self.assertIs(self.window.population, previous)
+        self.assertTrue(self.window.load_button.isEnabled())
+
+    def test_close_cancels_worker_before_destroying_thread(self):
+        entered = threading.Event()
+
+        def loading(*_args, cancelled, **_kwargs):
+            entered.set()
+            while not cancelled():
+                time.sleep(0.005)
+            raise DataError("cancelled")
+
+        self.window.population_edit.setText("population.csv")
+        self.window.code_edit.setText("codes.csv")
+        with patch("hotplace.ui.load_population", side_effect=loading):
+            self.window.start_load()
+            self.assertTrue(entered.wait(2))
+            self.window.close()
+            for _ in range(100):
+                QTest.qWait(10)
+                if self.window._thread is None:
+                    break
+            self.assertIsNone(self.window._thread)
+            self.assertFalse(self.window.isVisible())
 
 
 if __name__ == "__main__":

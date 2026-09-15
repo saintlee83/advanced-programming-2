@@ -6,6 +6,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "matplotlib>=3.8",
-    "pyqt-fluent-widgets>=1.11,<2",
-    "pyqt5>=5.15.10",
+    "pyside6-fluent-widgets>=1.11,<2",
+    "pyside6>=6.8,<7",
 ]
