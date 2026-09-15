@@ -6,26 +6,31 @@ PySide6-Fluent-Widgets와 matplotlib를 사용하며 웹 서버는 필요하지 
 
 ## 실행
 
-저장소 루트에서:
+이 폴더(`studies/study1/seoul-population/`)에서 실행한다.
+의존성은 저장소 루트의 `pyproject.toml`로 관리하며, `uv`가 위쪽 폴더에서 자동으로 찾는다.
 
 ```bash
+cd studies/study1/seoul-population
 uv sync
-uv run studies/study1/app.py
+uv run app.py
 ```
+
+저장소 루트에서는 `uv run studies/study1/seoul-population/app.py`로 실행한다.
 
 ‘데이터’ 화면에서 다음 두 CSV를 지정한다.
 
 - `LOCAL_PEOPLE_DONG_YYYYMM.csv`: 기준일, 시간대, 행정동 코드, 총생활인구, 남녀 각 14개 연령대
 - `dong_code.csv`: 기존 강의자료의 한글/영문 2줄 헤더 및 행정동 코드표
 
-`HOTPLACE_DATA_DIR`, 저장소의 `data/`, 형제 저장소
+`HOTPLACE_DATA_DIR`, 저장소 루트의 `data/`, 형제 저장소
 `Univ_Programming1/Lectures/midterm/data/` 순으로 기본 경로를 찾는다.
+저장소 루트는 `pyproject.toml`이 있는 가장 가까운 상위 폴더다.
 명령줄 경로는 GUI의 파일 입력란에도 반영된다.
 
 ```bash
-uv run studies/study1/app.py --population /path/LOCAL_PEOPLE_DONG_201912.csv --codes /path/dong_code.csv
-uv run studies/study1/app.py --check 역삼1동
-uv run studies/study1/app.py --check 역삼1동 --out /tmp/hotplace-charts
+uv run app.py --population /path/LOCAL_PEOPLE_DONG_201912.csv --codes /path/dong_code.csv
+uv run app.py --check 역삼1동
+uv run app.py --check 역삼1동 --out /tmp/hotplace-charts
 ```
 
 `--check`는 창을 열지 않고 14가지 분석, 관측 품질, 비교 리포트를 출력한다.
@@ -34,11 +39,11 @@ uv run studies/study1/app.py --check 역삼1동 --out /tmp/hotplace-charts
 
 ### macOS 앱 빌드
 
-Apple Silicon Mac에서 저장소 루트 기준:
+Apple Silicon Mac에서 이 폴더 기준:
 
 ```bash
-uv run --with 'pyinstaller>=6.16,<7' pyinstaller --noconfirm --distpath studies/study1/dist --workpath studies/study1/build studies/study1/Hotplace.spec
-open studies/study1/dist/Hotplace.app
+uv run --with 'pyinstaller>=6.16,<7' pyinstaller --noconfirm Hotplace.spec
+open dist/Hotplace.app
 ```
 
 `Hotplace.app`(Finder·Dock 표시 이름은 ‘서울 생활인구 비교’)에는 Python·PySide6·차트 리소스가 포함된다. CSV 데이터는 별도로 연결한다.
@@ -158,15 +163,16 @@ CSV를 한 번 읽으면서 행정동별 시간·성별·연령 합계와 날짜
 - 같은 `(행정동, 날짜, 시간)`은 첫 번째 행을 사용하고 이후 중복 행을 집계에서 제외한다.
 - 코드표와 일치하는 지역이 하나도 없으면 연결 실패로 처리한다.
 - 완전성의 지역 범위는 인구 파일에서 발견된 지역이다. 통째로 누락된 지역은 이 비율로 탐지하지 못한다.
-- `.cache/`에 버전 4 집계를 저장한다. 파일 경로·크기·나노초 수정시각이 달라지면 다시 읽는다.
+- 이 폴더의 `.cache/`에 버전 4 집계를 저장한다. 파일 경로·크기·나노초 수정시각이 달라지면 다시 읽는다.
 - 로딩은 `QThread`에서 실행하며, 종료 요청 시 중단 신호를 확인한 뒤 스레드를 정리한다.
 - 재로딩이 실패해도 기존 분석 데이터는 유지한다.
 
 ## 코드 구조
 
 ```text
-studies/study1/
+studies/study1/seoul-population/
 ├── app.py                 GUI / --check 진입점
+├── Hotplace.spec          macOS 앱 빌드 설정
 ├── hotplace/
 │   ├── dataset.py         CSV 검증·관측 집계·품질·캐시
 │   ├── hotplace.py        baseline + analysis1~14 결과 모델
@@ -183,8 +189,8 @@ studies/study1/
 ## 검증
 
 ```bash
-uv run python -m unittest discover -s studies/study1/tests -v
-uv run studies/study1/app.py --check 역삼1동 --out /tmp/hotplace-charts
+uv run python -m unittest discover -s tests -v
+uv run app.py --check 역삼1동 --out /tmp/hotplace-charts
 ```
 
 합성 데이터 테스트는 원본 CSV 없이 실행한다. 실제 2019년 12월 데이터는

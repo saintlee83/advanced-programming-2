@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """서울 생활인구 분석기 실행 파일.
 
-    uv run studies/study1/app.py                  # GUI 실행
-    uv run studies/study1/app.py --check 역삼1동   # GUI 없이 분석 결과만 확인
+    uv run app.py                  # GUI 실행 (이 폴더에서)
+    uv run app.py --check 역삼1동   # GUI 없이 분석 결과만 확인
 """
 
 from __future__ import annotations

@@ -376,20 +376,20 @@ def load_population(
 def default_data_dir() -> Path | None:
     """미리 채워 둘 기본 데이터 폴더를 찾는다.
 
-    ``HOTPLACE_DATA_DIR`` 환경변수를 먼저 보고, 없으면 형제 저장소인
-    Univ_Programming1 의 midterm 데이터 폴더를 찾아본다.
+    ``HOTPLACE_DATA_DIR`` 환경변수를 먼저 보고, 없으면 저장소의 ``data/`` 와
+    형제 저장소인 Univ_Programming1 의 midterm 데이터 폴더를 찾아본다.
+    저장소 루트는 위로 올라가며 ``pyproject.toml`` 이 있는 폴더로 정하므로
+    앱 폴더를 옮겨도 동작한다.
     """
     env = os.environ.get("HOTPLACE_DATA_DIR")
     if env and Path(env).is_dir():
         return Path(env)
 
-    here = Path(__file__).resolve()
-    repo_root = here.parents[3]                   # .../advanced-programming-2
-    if getattr(sys, "frozen", False):
-        # A development bundle can still discover data next to its source repository.
-        repo_root = next((parent for parent in Path(sys.executable).parents
-                          if (parent / "pyproject.toml").is_file()
-                          and (parent / "studies" / "study1").is_dir()), repo_root)
+    # 빌드한 앱은 실행 파일 위치에서, 소스 실행은 이 파일 위치에서 찾는다.
+    start = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
+    repo_root = next((parent for parent in start.parents if (parent / "pyproject.toml").is_file()), None)
+    if repo_root is None:
+        return None
     candidates = [
         repo_root / "data",
         repo_root.parent / "Univ_Programming1" / "Lectures" / "midterm" / "data",

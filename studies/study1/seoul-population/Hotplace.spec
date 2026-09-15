@@ -1,6 +1,6 @@
-"""Build with: uv run --with pyinstaller pyinstaller studies/study1/Hotplace.spec
+"""Build from this directory: uv run --with 'pyinstaller>=6.16,<7' pyinstaller --noconfirm Hotplace.spec
 
-Use --distpath studies/study1/dist --workpath studies/study1/build from the repo root.
+Outputs go to ./build and ./dist next to this file.
 """
 from pathlib import Path
 
@@ -11,7 +11,7 @@ a = Analysis(
     [str(root / "app.py")],
     pathex=[str(root)],
     binaries=[],
-    datas=collect_data_files("qfluentwidgets") + [(str(root / "hotplace/assets"), "hotplace/assets")],
+    datas=collect_data_files("qfluentwidgets"),
     hiddenimports=["PySide6.QtSvg"],
     hooksconfig={"matplotlib": {"backends": ["QtAgg", "Agg"]}},
     excludes=["PyQt5", "PyQt6", "PySide2", "tkinter"],
