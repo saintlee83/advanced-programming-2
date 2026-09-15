@@ -25,27 +25,31 @@ class Theme:
     accent_pressed: str
     on_accent: str
     hover: str
-    series: tuple[str, str]
-    series_soft: tuple[str, str]
+    series: tuple[str, str]        # 선·막대·점
+    series_soft: tuple[str, str]   # 배지 바탕
+    series_ink: tuple[str, str]    # 배지·지역 표시 글자 (같은 색상의 진한 톤, 4.5:1 이상)
     heat: tuple[str, str, str]
 
 
-# 화면 크롬은 무채색으로 두고, 색은 지역 A(파랑)·B(주황) 데이터에만 쓴다.
+# 화면 크롬은 무채색으로 두고, 색은 지역 A(파스텔 초록)·B(파스텔 보라) 데이터에만 쓴다.
+# 히트맵은 두 지역 색과 겹치지 않는 호박색 단색 계열이다.
 LIGHT = Theme(
     background="#f6f6f4", surface="#ffffff", muted="#efefec",
     ink="#1c1c1a", ink_soft="#6b6a65", border="#e3e2dd",
     grid="#ecebe7", axis="#c9c8c1", accent="#1c1c1a",
     accent_soft="#ebebe7", accent_hover="#3a3a37", accent_pressed="#000000",
-    on_accent="#ffffff", hover="#efefec", series=("#2a78d6", "#eb6834"),
-    series_soft=("#e6f0fb", "#fdebe3"), heat=("#f1effb", "#8b80e0", "#2f2378"),
+    on_accent="#ffffff", hover="#efefec", series=("#6fb07d", "#ae96da"),
+    series_soft=("#e6f3ec", "#efeaf8"), series_ink=("#2e7a53", "#6a51a8"),
+    heat=("#fdf0dc", "#f2a950", "#a9530c"),
 )
 DARK = Theme(
     background="#121211", surface="#1a1a19", muted="#252523",
     ink="#f1f1ee", ink_soft="#a6a59e", border="#2f2f2c",
     grid="#2a2a28", axis="#40403c", accent="#f1f1ee",
     accent_soft="#2c2c29", accent_hover="#ffffff", accent_pressed="#d4d4cf",
-    on_accent="#121211", hover="#252523", series=("#3987e5", "#d95926"),
-    series_soft=("#1b2a3e", "#3a2419"), heat=("#22202e", "#6457c9", "#c4bdf7"),
+    on_accent="#121211", hover="#252523", series=("#60a46f", "#9c83c9"),
+    series_soft=("#1d2d24", "#2a2438"), series_ink=("#a6dcb9", "#c9b8ee"),
+    heat=("#33251a", "#c47a2c", "#fbd49a"),
 )
 
 _theme = LIGHT
@@ -156,14 +160,14 @@ def apply_theme(app, dark: bool) -> None:
         QLabel[role="statValue"] {{ font-size: 20px; font-weight: 600; }}
         QLabel[role="cellValue"] {{ font-size: 15px; font-weight: 600; }}
         QLabel[role="metricUnit"] {{ color: {t.ink_soft}; font-size: 12px; }}
-        QLabel[role="regionTag"] {{ color: {t.series[0]}; font-size: 12px; font-weight: 700; }}
-        QLabel[role="regionTagB"] {{ color: {t.series[1]}; font-size: 12px; font-weight: 700; }}
-        QLabel[role="regionBadge"], QLabel[role="regionBadgeB"] {{ color: {t.series[0]}; background: {t.series_soft[0]}; border-radius: 6px; font-size: 12px; font-weight: 700; }}
-        QLabel[role="regionBadgeB"] {{ color: {t.series[1]}; background: {t.series_soft[1]}; }}
+        QLabel[role="regionTag"] {{ color: {t.series_ink[0]}; font-size: 12px; font-weight: 700; }}
+        QLabel[role="regionTagB"] {{ color: {t.series_ink[1]}; font-size: 12px; font-weight: 700; }}
+        QLabel[role="regionBadge"], QLabel[role="regionBadgeB"] {{ color: {t.series_ink[0]}; background: {t.series_soft[0]}; border-radius: 6px; font-size: 12px; font-weight: 700; }}
+        QLabel[role="regionBadgeB"] {{ color: {t.series_ink[1]}; background: {t.series_soft[1]}; }}
         QLabel[role="badge"] {{ color: {t.ink_soft}; background: {t.muted}; border-radius: 6px; padding: 4px 9px; font-size: 12px; }}
         QLabel[role="notice"] {{ color: {t.ink}; background: {t.muted}; border-radius: 8px; padding: 8px 12px; font-size: 13px; }}
-        QLabel#chartReadout {{ color: {t.ink_soft}; font-size: 12px; }}
-        QToolBar {{ background: {t.surface}; border: none; spacing: 2px; padding: 0; }}
+        QFrame#chartCallout {{ background: {t.surface}; border: 1px solid {t.border}; border-radius: 9px; }}
+        QLabel#chartCalloutText {{ background: transparent; }}
         QToolButton {{ background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 5px; }}
         QToolButton:hover, QToolButton:checked {{ background: {t.accent_soft}; border-color: {t.border}; }}
         QToolButton:focus {{ border-color: {t.accent}; }}

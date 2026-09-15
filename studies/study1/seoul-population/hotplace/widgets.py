@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import sys
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal, QVariantAnimation, QEasingCurve
 from PySide6.QtGui import QColor, QPainter, QPalette, QPen
@@ -11,8 +12,7 @@ from PySide6.QtWidgets import (
     QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout,
     QWidget, QStackedWidget,
 )
-from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-from qfluentwidgets import NavigationPushButton, Pivot, SegmentedWidget
+from qfluentwidgets import NavigationPushButton, Pivot, SegmentedWidget, TransparentPushButton
 
 from .hotplace import Hotplace, summary_text
 from .plotting import PlotCanvas
@@ -236,19 +236,9 @@ class ComparisonMetrics(QFrame):
             layout.addLayout(cell, 1)
 
 
-class AnalysisToolbar(NavigationToolbar2QT):
-    """분석에 필요한 탐색 도구만 표시한다. 저장은 화면의 내보내기 버튼에서 한다."""
-
-    toolitems = (
-        ("처음 범위", "처음 범위로 되돌리기", "home", "home"),
-        ("뒤로", "이전 범위", "back", "back"),
-        ("앞으로", "다음 범위", "forward", "forward"),
-        ("이동", "드래그해서 두 차트를 함께 이동", "move", "pan"),
-        ("확대", "영역을 드래그해서 두 차트를 함께 확대", "zoom_to_rect", "zoom"),
-    )
-
-
-READOUT_HINT = "차트 위에 마우스를 올리면 두 지역의 값이 여기에 표시됩니다."
+READOUT_HINT = "차트 위에 마우스를 올리면 두 지역의 값이 표시됩니다"
+NAVIGATION_HINT = (f"{'⌘' if sys.platform == 'darwin' else 'Ctrl'} + 스크롤 또는 핀치로 확대 · "
+                   "드래그로 이동 · 두 번 클릭하면 원래 크기")
 
 
 class AnalysisTab(QWidget):
@@ -257,44 +247,39 @@ class AnalysisTab(QWidget):
         self.setBackgroundRole(QPalette.Base)
         self.setAutoFillBackground(True)
         self.canvas = PlotCanvas(self)
-        self.toolbar = AnalysisToolbar(self.canvas, self)
-        self.toolbar.setIconSize(QSize(15, 15))
-        self.toolbar.setMinimumHeight(32)
-        self.toolbar.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-        self.toolbar.coordinates = False
-        # 좌표 대신 생활인구 수치를 읽는 한국어 안내를 표시한다.
-        if hasattr(self.toolbar, "locLabel"):
-            self.toolbar.locLabel.hide()
-        self.readout = label(READOUT_HINT, "caption")
-        self.readout.setObjectName("chartReadout")
-        self.readout.setWordWrap(True)
-        self.readout.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        self.readout.setFixedHeight(32)
-        self.canvas.hovered.connect(self._show_readout)
-        controls = QHBoxLayout()
-        controls.setContentsMargins(6, 4, 6, 0)
-        controls.addWidget(self.toolbar)
-        controls.addWidget(self.readout, 1)
+        # 마우스 판독 값은 커서 옆 말풍선에 표시한다.
+        self.readout = self.canvas.callout.body
+        self.hint_label = label(READOUT_HINT, "caption")
+        self.hint_label.setMinimumHeight(30)
+        self.reset_button = TransparentPushButton("원래 크기")
+        self.reset_button.setFont(QApplication.font())
+        self.reset_button.setIconSize(QSize(14, 14))
+        self.reset_button.setFixedHeight(30)
+        self.reset_button.setCursor(Qt.PointingHandCursor)
+        self.reset_button.setToolTip("확대·이동 전 범위로 되돌리기")
+        self.reset_button.clicked.connect(self.canvas.reset_view)
+        self.reset_button.hide()
+        self.canvas.zoomChanged.connect(self.reset_button.setVisible)
+        footer = QHBoxLayout()
+        footer.setContentsMargins(2, 6, 0, 0)
+        footer.addWidget(self.hint_label, 1)
+        footer.addWidget(self.reset_button)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addWidget(self.canvas, 1)
-        layout.addLayout(controls)
-        self.toolbar.hide()
-        self.hint = READOUT_HINT
+        layout.addLayout(footer)
+        self.refresh_icons()
 
-    def _show_readout(self, text: str) -> None:
-        self.readout.setText(text or self.hint)
+    def set_hint(self, text: str) -> None:
+        """차트 아래 안내. 확대할 수 있는 차트면 조작 방법을 덧붙인다."""
+        parts = [text] if text else []
+        if self.canvas.navigable:
+            parts.append(NAVIGATION_HINT)
+        self.hint_label.setText(" · ".join(parts))
 
     def refresh_icons(self) -> None:
-        icons = {
-            "home": "home", "back": "back", "forward": "arrow", "pan": "pan",
-            "zoom": "zoom", "configure_subplots": "settings",
-            "edit_parameters": "chart", "save_figure": "download",
-        }
-        for callback, icon in icons.items():
-            if callback in self.toolbar._actions:
-                self.toolbar._actions[callback].setIcon(make_icon(icon))
+        self.reset_button.setIcon(make_icon("home"))
 
 
 class AnalysisTabs(QWidget):

@@ -29,7 +29,7 @@ from .dataset import (
     find_population_csv, load_population,
 )
 from .hotplace import Hotplace, PairedAnalysis, rank_by_daily_average, summary_text
-from .plotting import draw_result, set_theme, theme
+from .plotting import EXPORT_DPI, draw_result, set_theme, theme
 from .theme import DARK, apply_theme, make_icon
 from .analytics import ROWS, compare_places, display, insight_cards, report_text, similarity_label
 from .widgets import (
@@ -1010,11 +1010,11 @@ class MainWindow(QWidget):
         self.chart_title.setText(CHART_TITLES[index])
         self.save_png_button.setEnabled(False)
         self.export_csv_button.setEnabled(False)
-        page.toolbar.setVisible(False)
 
         if place_a is None or place_b is None:
             self.chart_note.setText("")
             page.canvas.message("비교할 두 지역을 고르세요", "데이터를 불러오면 지역 A와 B를 같은 기준으로 비교합니다.")
+            page.set_hint("")
             return
 
         result = self._results.get(index)
@@ -1033,12 +1033,9 @@ class MainWindow(QWidget):
                 )
             self._results[index] = result
 
-        page.hint = CHART_HINTS.get(index, READOUT_HINT)
         draw_result(page.canvas, result, show_heading=False)
-        page.readout.setText(page.hint)
+        page.set_hint(CHART_HINTS.get(index, READOUT_HINT))
         self.chart_note.setText(result.analyses[0].note if isinstance(result, PairedAnalysis) else result.note)
-        page.toolbar.setVisible(True)
-        page.toolbar.update()
         self.save_png_button.setEnabled(True)
         self.export_csv_button.setEnabled(True)
 
@@ -1098,7 +1095,7 @@ class MainWindow(QWidget):
         canvas = self.tab_pages[index].canvas
         canvas.clear_hover()
         try:
-            canvas.figure.savefig(path, dpi=200, facecolor=theme().surface)
+            canvas.figure.savefig(path, dpi=EXPORT_DPI, facecolor=theme().surface)
         except OSError as exc:
             QMessageBox.critical(self, "저장하지 못했습니다", str(exc))
             return

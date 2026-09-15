@@ -107,11 +107,11 @@ def run_check(args) -> int:
 
     if args.out:
         from matplotlib.figure import Figure
-        from hotplace.plotting import draw_result
+        from hotplace.plotting import DPI, EXPORT_DPI, FIGSIZE, draw_result
 
         class _Fig:                       # 캔버스 없이 Figure 만 쓰는 얇은 껍데기
             def __init__(self):
-                self.figure = Figure(figsize=(7.4, 4.4), dpi=110, facecolor=theme().surface)
+                self.figure = Figure(figsize=FIGSIZE, dpi=DPI, facecolor=theme().surface)
             def clear(self): self.figure.clear()
             def draw_idle(self): pass
 
@@ -121,7 +121,7 @@ def run_check(args) -> int:
             holder = _Fig()
             draw_result(holder, result)
             path = out_dir / f"{name}.png"
-            holder.figure.savefig(path, dpi=160, facecolor=theme().surface)
+            holder.figure.savefig(path, dpi=EXPORT_DPI, facecolor=theme().surface)
             print(f"  저장: {path}")
 
     print("\n분석 1~14 정상 동작 확인.")

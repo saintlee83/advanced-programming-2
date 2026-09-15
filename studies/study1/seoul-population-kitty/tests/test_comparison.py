@@ -19,6 +19,7 @@ from matplotlib.backend_bases import MouseEvent
 
 from hotplace.dataset import CodeBook, DataError, Dong, DongAggregate, Population
 from hotplace.hotplace import PairedAnalysis
+from hotplace.theme import LIGHT, theme
 from hotplace.ui import CITY_TAB, MainWindow, OVERLAY_TAB
 
 
@@ -112,10 +113,8 @@ class ComparisonTests(unittest.TestCase):
 
     def test_either_region_keeps_the_selected_analysis(self):
         self.window.tabs.setCurrentIndex(2)
-        for target, selector in enumerate((self.window.region_a, self.window.region_b)):
-            self.window.search_target.setCurrentIndex(target)
-            self.window.search_edit.setText("다동")
-            self.window.search_button.click()
+        for selector in (self.window.region_a, self.window.region_b):
+            selector.set_dong(self.dongs[2])
             self.settle()
             self.assertEqual(selector.current(), self.dongs[2])
             self.assertEqual(self.window.tabs.currentIndex(), 2)
@@ -123,25 +122,31 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(paired.analyses[0], paired.analyses[1])
         self.assertTrue(self.window.export_csv_button.isEnabled())
 
-    def test_workspace_navigation_and_ranking_preserve_comparison(self):
+    def test_workspace_navigation_hides_disabled_pages_and_preserves_comparison(self):
         self.window.tabs.setCurrentIndex(2)
         before_a = self.window.region_a.current()
-        self.window.nav_items[1][0].click()
-        self.settle()
-        self.assertEqual(self.window.workspace_stack.currentIndex(), 1)
-        self.assertEqual(self.window.tabs.currentIndex(), 2)
-        self.window.search_target.setCurrentIndex(1)
-        selected = self.window.rank_table.item(0, 0).data(Qt.UserRole)
-        self.window.rank_select_button.click()
-        self.settle()
-        self.assertEqual(self.window.region_a.current(), before_a)
-        self.assertEqual(self.window.region_b.current(), selected)
-        self.assertEqual(self.window.workspace_stack.currentIndex(), 0)
-        self.assertEqual(self.window.tabs.currentIndex(), 2)
+        before_b = self.window.region_b.current()
+        for index in (1, 3):
+            button = self.window.nav_items[index][0]
+            self.assertFalse(button.isVisible())
+            self.assertFalse(button.isEnabled())
+            self.assertFalse(self.window.workspace_stack.widget(index).isEnabled())
+            button.click()
+            self.window._show_page(index)
+            self.settle()
+            self.assertEqual(self.window.workspace_stack.currentIndex(), 0)
+        self.assertFalse(self.window.top_button.isVisible())
+        self.assertFalse(self.window.top_button.isEnabled())
         self.window.nav_items[2][0].click()
         self.settle()
         self.assertEqual(self.window.workspace_stack.currentIndex(), 2)
         self.assertTrue(self.window.load_button.isEnabled())
+        self.window.nav_items[0][0].click()
+        self.settle()
+        self.assertEqual(self.window.workspace_stack.currentIndex(), 0)
+        self.assertEqual(self.window.tabs.currentIndex(), 2)
+        self.assertEqual(self.window.region_a.current(), before_a)
+        self.assertEqual(self.window.region_b.current(), before_b)
 
     def test_hover_reads_both_regions_and_stays_out_of_export(self):
         page = self.window.tab_pages[0]
@@ -166,7 +171,7 @@ class ComparisonTests(unittest.TestCase):
 
     def test_small_workspace_pages_have_no_horizontal_overflow(self):
         self.window.resize(1080, 740)
-        for index in range(4):
+        for index in (0, 2):
             self.window._show_page(index)
             self.settle()
             scroll = self.window.dashboard_scroll if index == 0 else self.window.workspace_stack.widget(index)
@@ -239,7 +244,7 @@ class ComparisonTests(unittest.TestCase):
         self.assertIn(f"B · {self.dongs[1].label}", page.readout.text())
 
     def test_rapid_navigation_and_reduced_motion_settle(self):
-        for index in (3, 2, 1, 3, 0):
+        for index in (2, 0, 2, 0):
             self.window._show_page(index)
         for index in (7, 1, 6, 0):
             self.window.tabs.setCurrentIndex(index)
@@ -249,11 +254,11 @@ class ComparisonTests(unittest.TestCase):
         self.assertFalse(self.window.workspace_stack.overlay.isVisible())
         self.assertFalse(self.window.tabs.stack.overlay.isVisible())
         self.window._toggle_motion(True)
-        self.window._show_page(3)
+        self.window._show_page(2)
         self.assertFalse(self.window.workspace_stack.overlay.isVisible())
         self.window._toggle_motion(False)
 
-    def test_insight_report_and_theme_switch(self):
+    def test_insight_report_and_light_theme(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "report.txt"
             with patch("hotplace.ui.QFileDialog.getSaveFileName", return_value=(str(path), "TXT")):
@@ -263,9 +268,8 @@ class ComparisonTests(unittest.TestCase):
                 self.assertIn(dong.label, report)
             self.assertIn("상관계수", report)
         self.window.tabs.setCurrentIndex(6)
-        self.window._toggle_theme()
         self.settle()
-        self.window._toggle_theme()
+        self.assertIs(theme(), LIGHT)
         self.assertEqual(self.window.tabs.currentIndex(), 6)
 
     def test_failed_background_reload_preserves_analysis(self):

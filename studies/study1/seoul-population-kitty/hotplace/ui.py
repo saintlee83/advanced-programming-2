@@ -9,7 +9,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QFont, QPalette
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QAbstractButton, QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QFileDialog,
     QFrame, QHBoxLayout, QHeaderView, QLabel, QLayout, QLineEdit, QListWidget,
@@ -27,12 +27,12 @@ from .dataset import (
     find_population_csv, load_population,
 )
 from .hotplace import Hotplace, PairedAnalysis, rank_by_daily_average, summary_text
-from .plotting import draw_result, set_theme, theme
-from .theme import DARK, apply_theme, make_icon
+from .plotting import draw_result, theme
+from .theme import apply_theme, make_icon
 from .analytics import ROWS, compare_places, display, insight_cards, report_text, similarity_label
 from .widgets import (
     READOUT_HINT, AnalysisTabs, ComparisonMetrics, ComparisonTable, NavigationItem,
-    AnimatedStack, label as _label, motion_enabled, region_badge, separator as _separator, stat_cell,
+    AnimatedStack, label as _label, region_badge, separator as _separator, stat_cell,
 )
 
 # 차트 번호 i 는 Hotplace.analysis(i + 1) 에 대응한다.
@@ -59,6 +59,7 @@ CHART_HINTS = {
     13: "점에 마우스를 올리면 행정동 이름과 배율이 표시됩니다",
 }
 PAGE_TITLES = ("지역 비교", "지역 찾기", "데이터", "비교 리포트")
+DISABLED_PAGES = frozenset({1, 3})
 PAGE_NOTES = (
     "두 행정동의 생활인구를 같은 기준, 같은 축으로 비교합니다.",
     "이름으로 검색하거나 순위표에서 골라 지역 A 또는 B에 넣습니다.",
@@ -244,7 +245,7 @@ class MainWindow(QWidget):
         self.resize(1480, 980)
         self.setMinimumSize(1080, 740)
         self._icon_buttons = []
-        apply_theme(QApplication.instance(), theme() is DARK)
+        apply_theme(QApplication.instance(), False)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -255,6 +256,8 @@ class MainWindow(QWidget):
         self.workspace_stack.addWidget(self._build_explore_page())
         self.workspace_stack.addWidget(self._build_data_page())
         self.workspace_stack.addWidget(self._build_report_page())
+        for index in DISABLED_PAGES:
+            self.workspace_stack.widget(index).setEnabled(False)
         root.addWidget(self.workspace_stack, 1)
         footer = QHBoxLayout()
         footer.setContentsMargins(28, 10, 28, 12)
@@ -299,15 +302,12 @@ class MainWindow(QWidget):
             button.clicked.connect(lambda _checked=False, i=index: self._show_page(i))
             self.nav_items.append((button, icon))
         for index in (0, 3, 1, 2):
-            navigation.addWidget(self.nav_items[index][0])
+            button = self.nav_items[index][0]
+            navigation.addWidget(button)
+            if index in DISABLED_PAGES:
+                button.setEnabled(False)
+                button.hide()
         navigation.addStretch()
-        self.theme_button = NavigationItem(make_icon("moon"), "어두운 테마", selectable=False)
-        self.theme_button.clicked.connect(lambda _checked=False: self._toggle_theme())
-        navigation.addWidget(self.theme_button)
-        self.motion_button = NavigationItem(make_icon("pulse"), "", selectable=False)
-        self.motion_button.clicked.connect(lambda _checked=False: self._toggle_motion(motion_enabled()))
-        self._set_motion_text()
-        navigation.addWidget(self.motion_button)
         layout.addLayout(navigation)
         return header
 
@@ -340,6 +340,8 @@ class MainWindow(QWidget):
         return scroll
 
     def _show_page(self, index: int) -> None:
+        if index in DISABLED_PAGES:
+            return
         self.workspace_stack.setCurrentIndex(index, duration=240)
         self.page_title.setText(PAGE_TITLES[index])
         self.page_note.setText(PAGE_NOTES[index])
@@ -379,6 +381,7 @@ class MainWindow(QWidget):
         self.top_button.setEnabled(False)
         self.top_button.clicked.connect(lambda: self._show_page(1))
         actions.addWidget(self.top_button)
+        self.top_button.hide()
         selectors.addLayout(actions)
         selectors.addSpacing(10)
         selectors.addWidget(_label("주요 지표", "section"))
@@ -438,7 +441,7 @@ class MainWindow(QWidget):
         steps.setSpacing(16)
         for number, title, note in (("01", "파일 연결", "생활인구 CSV + 행정동 코드표"),
                                     ("02", "지역 선택", "비교할 행정동 A·B 지정"),
-                                    ("03", "분석", "차트와 비교 리포트 확인")):
+                                    ("03", "분석", "생활인구 비교 차트 확인")):
             tile = QFrame()
             tile.setProperty("role", "stepCard")
             row = QHBoxLayout(tile)
@@ -818,12 +821,8 @@ class MainWindow(QWidget):
                 return
             self.status.setText(f"리포트를 저장했습니다: {path}")
 
-    def _set_motion_text(self) -> None:
-        self.motion_button.setText("애니메이션 끄기" if motion_enabled() else "애니메이션 켜기")
-
     def _toggle_motion(self, checked):
         QApplication.instance().setProperty("reducedMotion", checked)
-        self._set_motion_text()
         if checked:
             for stack in self.findChildren(AnimatedStack):
                 stack.stop_transition()
@@ -843,25 +842,12 @@ class MainWindow(QWidget):
         self.setWindowIcon(kitty)
         QApplication.instance().setWindowIcon(kitty)
         self.brand_icon.setPixmap(make_icon("kitty", size=32).pixmap(QSize(32, 28)))
-        dark = theme() is DARK
-        self.theme_button.setText("밝은 테마" if dark else "어두운 테마")
-        self.theme_button.setIcon(make_icon("sun" if dark else "moon"))
-        self.motion_button.setIcon(make_icon("pulse"))
         self.welcome_icon.setPixmap(make_icon("kitty", size=132).pixmap(QSize(132, 100)))
         for item, icon in self.nav_items:
             item.setIcon(make_icon(icon))
         for page in self.tab_pages:
             page.refresh_icons()
         self.tabs.finish_motion()
-
-    def _toggle_theme(self) -> None:
-        for stack in self.findChildren(AnimatedStack):
-            stack.stop_transition()
-        apply_theme(QApplication.instance(), theme() is not DARK)
-        self._refresh_theme_controls()
-        if self.population:
-            self._render_current()
-            self._update_intelligence()
 
     def _prefill_paths(self) -> None:
         """기본 데이터 폴더를 찾아 경로 칸을 미리 채운다."""
@@ -964,7 +950,7 @@ class MainWindow(QWidget):
         self.region_b.blockSignals(True)
         self.region_a.populate(codebook, population)
         self.region_b.populate(codebook, population)
-        for widget in (self.search_edit, self.search_button, self.top_button,
+        for widget in (self.search_edit, self.search_button,
                        self.summary_button, self.swap_button, self.search_target):
             widget.setEnabled(True)
 
@@ -1197,8 +1183,6 @@ def run(population_csv=None, code_csv=None) -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    # 시스템이 다크 모드면 그래프도 어두운 테마로 (창 배경 밝기로 판단).
-    set_theme(app.palette().color(QPalette.Window).lightness() < 128)
     window = MainWindow()
     if population_csv:
         window.population_edit.setText(population_csv)

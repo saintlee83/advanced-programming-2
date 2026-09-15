@@ -12,10 +12,11 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
+from PySide6.QtGui import QWheelEvent
 from PySide6.QtWidgets import QApplication
 from PySide6.QtTest import QTest
-from matplotlib.backend_bases import MouseEvent
+from matplotlib.backend_bases import MouseButton, MouseEvent
 
 from hotplace.dataset import CodeBook, DataError, Dong, DongAggregate, Population
 from hotplace.hotplace import PairedAnalysis
@@ -163,6 +164,47 @@ class ComparisonTests(unittest.TestCase):
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 1000)
         self.assertFalse(any(line.get_visible() for line in canvas._hover_lines))
+
+    def test_zoom_and_pan_stay_linked_within_range_and_reset(self):
+        page = self.window.tab_pages[0]
+        canvas = page.canvas
+        canvas.draw()
+        left, right = canvas.figure.axes[:2]
+        home = left.get_xlim()
+        x, y = left.transData.transform((12, left.get_ylim()[1] / 2))
+
+        # 그냥 스크롤은 페이지로 넘긴다.
+        wheel = QWheelEvent(QPointF(x, canvas.height() - y), QPointF(), QPoint(), QPoint(0, 120),
+                            Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
+        canvas.wheelEvent(wheel)
+        self.assertFalse(wheel.isAccepted())
+        self.assertEqual(left.get_xlim(), home)
+
+        canvas.zoom(0.5, x, y)
+        zoomed = left.get_xlim()
+        self.assertAlmostEqual(zoomed[1] - zoomed[0], (home[1] - home[0]) / 2)
+        self.assertEqual(right.get_xlim(), zoomed)
+        self.assertTrue(page.reset_button.isVisibleTo(page))
+
+        canvas.callbacks.process("button_press_event",
+                                 MouseEvent("button_press_event", canvas, x, y, MouseButton.LEFT))
+        canvas.callbacks.process("motion_notify_event",
+                                 MouseEvent("motion_notify_event", canvas, x + 5000, y, MouseButton.LEFT))
+        canvas.callbacks.process("button_release_event",
+                                 MouseEvent("button_release_event", canvas, x + 5000, y, MouseButton.LEFT))
+        self.assertAlmostEqual(left.get_xlim()[0], home[0])      # 원래 범위 밖으로 끌려가지 않는다
+        self.assertAlmostEqual(left.get_xlim()[1] - left.get_xlim()[0], zoomed[1] - zoomed[0])
+
+        canvas.zoom(10, x, y)
+        self.assertEqual(left.get_xlim(), home)
+        canvas.zoom(0.5, x, y)
+        page.reset_button.click()
+        self.assertEqual(left.get_xlim(), home)
+        self.assertFalse(page.reset_button.isVisibleTo(page))
+
+        self.window.tabs.setCurrentIndex(4)                    # 피라미드는 확대하지 않는다
+        self.settle()
+        self.assertFalse(self.window.tab_pages[4].canvas.navigable)
 
     def test_small_workspace_pages_have_no_horizontal_overflow(self):
         self.window.resize(1080, 740)
