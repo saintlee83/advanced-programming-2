@@ -1,95 +1,38 @@
-"""상단 메뉴, 세로 지표, 차트 선택기, 항목별 비교 카드."""
+"""세로 지표 카드, 차트 선택기, 차트 한 장을 담는 화면 부품."""
 
 from __future__ import annotations
 
 import math
-import os
 
-from PySide6.QtCore import QRectF, QSize, Qt, Signal, QVariantAnimation, QEasingCurve
-from PySide6.QtGui import QColor, QIcon, QPainter, QPalette, QPen
-from PySide6.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QLayout, QSizePolicy, QVBoxLayout,
-    QWidget, QStackedWidget,
+from PyQt5.QtCore import QSize, Qt, pyqtSignal
+from PyQt5.QtGui import QPalette
+from PyQt5.QtWidgets import (
+    QApplication, QFrame, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget,
+    QVBoxLayout, QWidget,
 )
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
-from qfluentwidgets import ComboBox, NavigationPushButton
+from qfluentwidgets import ComboBox as FluentComboBox, MenuAnimationType
+from qfluentwidgets.components.widgets.combo_box import ComboBoxMenu
 
 from .hotplace import Hotplace, summary_text
 from .plotting import PlotCanvas
-from .theme import DARK, LIGHT, make_icon, theme
+from .theme import make_icon
 
 
-def motion_enabled() -> bool:
-    app = QApplication.instance()
-    return os.environ.get("HOTPLACE_REDUCED_MOTION") != "1" and not (app and app.property("reducedMotion"))
+class _ComboMenu(ComboBoxMenu):
+    """콤보 상자의 목록. 펼쳐지는 애니메이션을 건너뛰고 바로 제자리에 표시한다."""
+
+    def exec(self, pos, ani=True, aniType=MenuAnimationType.DROP_DOWN):
+        super().exec(pos, ani, aniType)
+        animation = self.aniManager.ani
+        animation.setCurrentTime(animation.duration())
 
 
-class TransitionOverlay(QWidget):
-    """Fade and translate a snapshot, leaving the live destination fully interactive."""
+class ComboBox(FluentComboBox):
+    """Fluent 콤보 상자. 모양은 그대로 두고 목록의 펼침 애니메이션만 끈다."""
 
-    def __init__(self, parent):
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
-        self.pixmap = None
-        self.progress = 0.0
-        self.direction = 1
-        self.animation = QVariantAnimation(self)
-        self.animation.setStartValue(0.0)
-        self.animation.setEndValue(1.0)
-        self.animation.setEasingCurve(QEasingCurve.OutCubic)
-        self.animation.valueChanged.connect(self._step)
-        self.animation.finished.connect(self.hide)
-        self.hide()
-
-    def _step(self, value):
-        self.progress = value
-        self.update()
-
-    def paintEvent(self, event):
-        if self.pixmap is None:
-            return
-        painter = QPainter(self)
-        painter.setOpacity(1 - self.progress)
-        painter.drawPixmap(int(-self.direction * 24 * self.progress), 0, self.pixmap)
-        painter.end()
-
-
-class AnimatedStack(QStackedWidget):
-    """Interruptible page transitions. Selection state changes synchronously."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.overlay = TransitionOverlay(self)
-
-    def addWidget(self, widget, **_kwargs):
-        return super().addWidget(widget)
-
-    def setCurrentIndex(self, index, duration=240):
-        if index == self.currentIndex() or not 0 <= index < self.count():
-            return
-        self.overlay.animation.stop()
-        self.overlay.hide()
-        old = self.currentIndex()
-        snapshot = self.grab() if self.isVisible() and motion_enabled() else None
-        super().setCurrentIndex(index)
-        if snapshot is not None:
-            self.overlay.pixmap = snapshot
-            self.overlay.direction = 1 if index > old else -1
-            self.overlay.progress = 0
-            self.overlay.setGeometry(self.rect())
-            self.overlay.show()
-            self.overlay.raise_()
-            self.overlay.animation.setDuration(duration)
-            self.overlay.animation.start()
-
-    def stop_transition(self):
-        self.overlay.animation.stop()
-        self.overlay.hide()
-        self.update()
-
-    def resizeEvent(self, event):
-        self.stop_transition()
-        super().resizeEvent(event)
+    def _createComboMenu(self):
+        return _ComboMenu(self)
 
 
 def label(text: str, role: str, wrap: bool = False) -> QLabel:
@@ -99,92 +42,12 @@ def label(text: str, role: str, wrap: bool = False) -> QLabel:
     return result
 
 
-def separator(vertical: bool = False) -> QFrame:
-    line = QFrame()
-    line.setProperty("role", "separator")
-    if vertical:
-        line.setFixedWidth(1)
-    else:
-        line.setFixedHeight(1)
-    return line
-
-
 def region_badge(region: str) -> QLabel:
     badge = label(region[-1], "regionBadgeB" if region.endswith("B") else "regionBadge")
     badge.setFixedSize(26, 26)
     badge.setAlignment(Qt.AlignCenter)
     badge.setAccessibleName(region)
     return badge
-
-
-def clear_layout(layout: QLayout) -> None:
-    while layout.count():
-        item = layout.takeAt(0)
-        if item.widget() is not None:
-            item.widget().hide()
-            item.widget().deleteLater()
-        elif item.layout() is not None:
-            clear_layout(item.layout())
-
-
-class NavigationItem(NavigationPushButton):
-    """상단 내비게이션. 마우스와 키보드 활성화를 모두 지원한다."""
-
-    def __init__(self, icon, text: str, parent=None, selectable: bool = True) -> None:
-        super().__init__(icon, text, selectable, parent)
-        self.setCompacted(False)
-        self.setFixedSize(146, 38)
-        self.setFont(QApplication.font())
-        self.setFocusPolicy(Qt.StrongFocus)
-        self.setAccessibleName(text)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setTextColor(LIGHT.ink, DARK.ink)
-        self.setIndicatorColor(LIGHT.accent, DARK.accent)
-        self._keyboard_focus = False
-
-    def setText(self, text: str) -> None:
-        super().setText(text)
-        self.setAccessibleName(text)
-
-    def keyPressEvent(self, event) -> None:
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
-            self.click()
-        else:
-            super().keyPressEvent(event)
-
-    def focusInEvent(self, event) -> None:
-        # 창이 열릴 때 생기는 포커스에는 테두리를 그리지 않는다. 키보드로 이동할 때만 표시한다.
-        self._keyboard_focus = event.reason() in (Qt.TabFocusReason, Qt.BacktabFocusReason)
-        super().focusInEvent(event)
-
-    def focusOutEvent(self, event) -> None:
-        self._keyboard_focus = False
-        super().focusOutEvent(event)
-
-    def paintEvent(self, event) -> None:
-        t = theme()
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        if not self.isEnabled():
-            painter.setOpacity(0.4)
-        elif self.isPressed:
-            painter.setOpacity(0.8)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(t.accent_soft if self.isSelected else t.hover if self.isEnter else t.background))
-        painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 6, 6)
-        ink = t.ink
-        icon = self.icon()
-        icon.paint(painter, 14, 10, 18, 18, Qt.AlignCenter, QIcon.Normal)
-        font = self.font()
-        font.setBold(self.isSelected)
-        painter.setFont(font)
-        painter.setPen(QColor(ink))
-        painter.drawText(QRectF(40, 0, self.width() - 48, self.height()), Qt.AlignVCenter, self.text())
-        if self.hasFocus() and self._keyboard_focus:
-            painter.setPen(QPen(QColor(t.ink), 1.5, Qt.DashLine))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRoundedRect(QRectF(self.rect()).adjusted(3, 3, -3, -3), 4, 4)
-        painter.end()
 
 
 class MetricLabels:
@@ -318,7 +181,7 @@ class AnalysisTab(QWidget):
 class AnalysisTabs(QWidget):
     """분석 분류와 차트 선택기를 갖춘 비교 패널."""
 
-    currentChanged = Signal(int)
+    currentChanged = pyqtSignal(int)
 
     def __init__(self, titles, groups, parent=None):
         super().__init__(parent)
@@ -336,7 +199,7 @@ class AnalysisTabs(QWidget):
             picker.setMinimumWidth(146)
         self.group_picker.currentIndexChanged.connect(self._choose_group)
         self.chart_picker.currentIndexChanged.connect(self._choose_chart)
-        self.stack = AnimatedStack(self)
+        self.stack = QStackedWidget(self)
         self.pages = [AnalysisTab(self) for _ in titles]
         for page in self.pages:
             self.stack.addWidget(page)
@@ -384,84 +247,11 @@ class AnalysisTabs(QWidget):
 
     def _changed(self, index):
         self._select(index)
-        if not motion_enabled():
-            self.finish_motion()
         self.currentChanged.emit(index)
-
-    def finish_motion(self):
-        self.stack.stop_transition()
 
     def currentIndex(self):
         return self.stack.currentIndex()
 
     def setCurrentIndex(self, index):
-        self.stack.setCurrentIndex(index, duration=220)
-
-
-def stat_cell(caption: str) -> tuple[QVBoxLayout, QLabel, QLabel]:
-    """작은 제목 · 큰 값 · 보조 설명 한 묶음."""
-    cell = QVBoxLayout()
-    cell.setSpacing(4)
-    cell.addWidget(label(caption, "muted"))
-    value = label("—", "statValue")
-    note = label("", "caption", True)
-    cell.addWidget(value)
-    cell.addWidget(note)
-    return cell, value, note
-
-
-class ComparisonTable(QFrame):
-    """항목별로 A/B 결과를 나란히 표시하는 비교 카드."""
-
-    chartRequested = Signal(int)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setObjectName("observationNotes")
-        self._regions = ("지역 A", "지역 B")
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        outer.setSpacing(12)
-        self._body = QVBoxLayout()
-        self._body.setSpacing(14)
-        outer.addLayout(self._body)
-        self.empty = label("데이터를 불러오고 두 지역을 선택하면 비교 결과가 표시됩니다.", "notice", True)
-        outer.addWidget(self.empty)
-
-    def set_regions(self, left, right):
-        self._regions = (left, right)
-
-    def set_rows(self, rows):
-        clear_layout(self._body)
-        self.empty.setVisible(not rows)
-        for index, (name, definition, chart, *cells) in enumerate(rows):
-            card = QFrame()
-            card.setProperty("role", "noteCard")
-            layout = QVBoxLayout(card)
-            layout.setContentsMargins(20, 18, 20, 18)
-            layout.setSpacing(12)
-            heading = QHBoxLayout()
-            heading.addWidget(label(name, "section"), 1)
-            if chart is not None:
-                link = label(f'<a href="{chart}" style="color: {theme().ink};">차트 보기</a>', "caption")
-                link.setTextInteractionFlags(Qt.LinksAccessibleByMouse | Qt.LinksAccessibleByKeyboard)
-                link.linkActivated.connect(lambda href: self.chartRequested.emit(int(href)))
-                heading.addWidget(link)
-            layout.addLayout(heading)
-            layout.addWidget(label(definition, "caption", True))
-            values = QHBoxLayout()
-            values.setSpacing(12)
-            for column, (value, detail) in enumerate(cells):
-                panel = QFrame()
-                panel.setProperty("role", "noteA" if column == 0 else "noteB")
-                cell = QVBoxLayout(panel)
-                cell.setContentsMargins(14, 12, 14, 12)
-                cell.setSpacing(6)
-                cell.addWidget(label(f"{'AB'[column]} · {self._regions[column]}", "regionTag" if column == 0 else "regionTagB", True))
-                cell.addWidget(label(value, "cellValue", True))
-                if detail:
-                    cell.addWidget(label(detail, "muted", True))
-                cell.addStretch()
-                values.addWidget(panel, 1)
-            layout.addLayout(values)
-            self._body.addWidget(card)
+        if index in self._group_of:                   # 선택 목록에 없는(비활성화한) 차트는 열지 않는다
+            self.stack.setCurrentIndex(index)

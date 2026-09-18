@@ -6,7 +6,7 @@
     hotplace  Hotplace 클래스 (analysis1~8, 요약 통계)
     analytics 확장 진단 · 리포트
     plotting  matplotlib 렌더링
-    ui        PySide6 화면
+    ui        PyQt5 화면
 """
 
 from .dataset import (

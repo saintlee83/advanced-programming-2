@@ -1,4 +1,4 @@
-"""두 지역을 바꿔도 계산·화면·내보내기가 대칭인지 검증한다."""
+"""데이터 불러오기 → 차트 보기 흐름과, 두 지역을 바꿔도 계산·화면·내보내기가 대칭인지 검증한다."""
 
 import os
 from pathlib import Path
@@ -10,17 +10,19 @@ import unittest
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_API", "pyqt5")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication
-from PySide6.QtTest import QTest
+from PyQt5.QtCore import QAbstractAnimation
+from PyQt5.QtWidgets import QApplication, QStackedWidget
+from PyQt5.QtTest import QTest
 from matplotlib.backend_bases import MouseEvent
 
-from hotplace.dataset import CodeBook, DataError, Dong, DongAggregate, Population
-from hotplace.hotplace import PairedAnalysis
+from hotplace.dataset import COL_END, CodeBook, DataError, Dong, DongAggregate, Population, identify_csv
+from hotplace.hotplace import Hotplace, PairedAnalysis
+from hotplace.plotting import draw_result
 from hotplace.theme import LIGHT, theme
-from hotplace.ui import CITY_TAB, MainWindow, OVERLAY_TAB
+from hotplace.ui import CITY_TAB, DISABLED_CHARTS, MainWindow, OVERLAY_TAB, TAB_GROUPS
 
 
 class ComparisonTests(unittest.TestCase):
@@ -122,31 +124,85 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(paired.analyses[0], paired.analyses[1])
         self.assertTrue(self.window.export_csv_button.isEnabled())
 
-    def test_workspace_navigation_hides_disabled_pages_and_preserves_comparison(self):
-        self.window.tabs.setCurrentIndex(2)
-        before_a = self.window.region_a.current()
-        before_b = self.window.region_b.current()
-        for index in (1, 3):
-            button = self.window.nav_items[index][0]
-            self.assertFalse(button.isVisible())
-            self.assertFalse(button.isEnabled())
-            self.assertFalse(self.window.workspace_stack.widget(index).isEnabled())
-            button.click()
-            self.window._show_page(index)
-            self.settle()
-            self.assertEqual(self.window.workspace_stack.currentIndex(), 0)
-        self.assertFalse(self.window.top_button.isVisible())
-        self.assertFalse(self.window.top_button.isEnabled())
-        self.window.nav_items[2][0].click()
-        self.settle()
-        self.assertEqual(self.window.workspace_stack.currentIndex(), 2)
-        self.assertTrue(self.window.load_button.isEnabled())
-        self.window.nav_items[0][0].click()
-        self.settle()
-        self.assertEqual(self.window.workspace_stack.currentIndex(), 0)
-        self.assertEqual(self.window.tabs.currentIndex(), 2)
-        self.assertEqual(self.window.region_a.current(), before_a)
-        self.assertEqual(self.window.region_b.current(), before_b)
+    def test_window_moves_from_loading_to_charts(self):
+        fresh = MainWindow()
+        try:
+            self.assertEqual(fresh.pages.count(), 2)
+            self.assertEqual(fresh.pages.currentIndex(), 0)
+            self.assertTrue(fresh.reload_button.isHidden())
+            self.assertTrue(fresh.progress.isHidden())
+        finally:
+            fresh.deleteLater()
+        self.assertEqual(self.window.pages.currentIndex(), 1)
+        self.assertFalse(self.window.reload_button.isHidden())
+        self.assertIn("3개 행정동", self.window.data_badge.text())
+
+    def write_csvs(self, directory):
+        population = Path(directory) / "people.csv"
+        population.write_text(",".join(f"c{i}" for i in range(COL_END)) + "\n", encoding="utf-8")
+        codes = Path(directory) / "codes.csv"
+        codes.write_text("통계청행정동코드,행자부행정동코드,시도명,시군구명,행정동명\n", encoding="utf-8-sig")
+        return str(population), str(codes)
+
+    def test_load_button_picks_two_files_in_any_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            population, codes = self.write_csvs(directory)
+            self.assertEqual(identify_csv(population), "population")
+            self.assertEqual(identify_csv(codes), "codes")
+            for picked in ([population, codes], [codes, population]):
+                with patch("hotplace.ui.QFileDialog.getOpenFileNames", return_value=(picked, "")), \
+                     patch.object(self.window, "start_load") as start:
+                    self.window.load_data()
+                start.assert_called_once_with(population, codes)
+            # 하나만 고르면 나머지 파일을 이어서 묻는다.
+            with patch("hotplace.ui.QFileDialog.getOpenFileNames", return_value=([codes], "")), \
+                 patch("hotplace.ui.QFileDialog.getOpenFileName", return_value=(population, "")) as second, \
+                 patch.object(self.window, "start_load") as start:
+                self.window.load_data()
+            self.assertIn("생활인구", second.call_args.args[1])
+            start.assert_called_once_with(population, codes)
+
+    def test_load_button_rejects_wrong_selections(self):
+        with tempfile.TemporaryDirectory() as directory:
+            population, codes = self.write_csvs(directory)
+            cases = ([], [codes, codes], [population, codes, codes])
+            for picked in cases:
+                with self.subTest(picked=len(picked)), \
+                     patch("hotplace.ui.QFileDialog.getOpenFileNames", return_value=(picked, "")), \
+                     patch("hotplace.ui.QMessageBox.warning") as warning, \
+                     patch.object(self.window, "start_load") as start:
+                    self.window.load_data()
+                    start.assert_not_called()
+                    self.assertEqual(warning.called, bool(picked))
+            with patch("hotplace.ui.QFileDialog.getOpenFileNames", return_value=([codes], "")), \
+                 patch("hotplace.ui.QFileDialog.getOpenFileName", return_value=("", "")), \
+                 patch.object(self.window, "start_load") as start:
+                self.window.load_data()                       # 두 번째 창에서 취소
+            start.assert_not_called()
+
+    def test_heatmaps_are_disabled_but_still_drawable(self):
+        self.assertEqual(DISABLED_CHARTS, {6, 12})
+        offered = {chart for _name, charts in TAB_GROUPS for chart in charts}
+        self.assertEqual(offered, set(range(14)) - DISABLED_CHARTS)
+        tabs = self.window.tabs
+        tabs.setCurrentIndex(5)
+        for index in DISABLED_CHARTS:
+            tabs.setCurrentIndex(index)
+            self.assertEqual(tabs.currentIndex(), 5)
+        for group in range(tabs.group_picker.count()):
+            tabs.group_picker.setCurrentIndex(group)
+            titles = [tabs.chart_picker.itemText(row) for row in range(tabs.chart_picker.count())]
+            self.assertNotIn("요일×시간", titles)
+            self.assertNotIn("연령×시간", titles)
+        # 계산과 그리기 코드는 남아 있다(--check --out 에서 쓴다): 두 히트맵은 같은 색 범위를 쓴다.
+        places = [Hotplace(dong, self.window.population) for dong in self.dongs[:2]]
+        result = PairedAnalysis("요일 × 시간대 비교", tuple(place.label for place in places),
+                                tuple(place.analysis7() for place in places))
+        canvas = self.window.tab_pages[6].canvas
+        draw_result(canvas, result, show_heading=False)
+        canvas.draw()
+        top, bottom = canvas.figure.axes[:2]
+        self.assertEqual(top.images[0].get_clim(), bottom.images[0].get_clim())
 
     def test_hover_reads_both_regions_and_stays_out_of_export(self):
         page = self.window.tab_pages[0]
@@ -171,14 +227,14 @@ class ComparisonTests(unittest.TestCase):
 
     def test_small_workspace_pages_have_no_horizontal_overflow(self):
         self.window.resize(1080, 740)
-        for index in (0, 2):
-            self.window._show_page(index)
+        for index in (1, 0):
+            self.window.pages.setCurrentIndex(index)
             self.settle()
-            scroll = self.window.dashboard_scroll if index == 0 else self.window.workspace_stack.widget(index)
+            scroll = self.window.pages.widget(index)
             self.assertLessEqual(scroll.widget().width(), scroll.viewport().width())
 
     def test_new_analyses_export_and_render_missing_observations(self):
-        for index, rows, columns in ((5, 3, 5), (6, 8, 49), (7, 25, 3)):
+        for index, rows, columns in ((5, 3, 5), (7, 25, 3)):
             with self.subTest(tab=index):
                 self.window.tabs.setCurrentIndex(index)
                 self.settle()
@@ -188,14 +244,10 @@ class ComparisonTests(unittest.TestCase):
                 self.assertTrue(all(len(row) == columns for row in exported))
                 self.assertIn(self.dongs[0].label, " ".join(exported[0]))
                 self.assertIn(self.dongs[1].label, " ".join(exported[0]))
-                canvas = self.window.tab_pages[index].canvas
-                canvas.draw()
-                if index == 6:
-                    left, right = canvas.figure.axes[:2]
-                    self.assertEqual(left.images[0].get_clim(), right.images[0].get_clim())
+                self.window.tab_pages[index].canvas.draw()
 
     def test_added_comparisons_export_and_render(self):
-        for index, rows, columns in ((8, 25, 4), (9, 8, 3), (10, 25, 3), (11, 15, 4), (12, 15, 49), (13, 4, 4)):
+        for index, rows, columns in ((8, 25, 4), (9, 8, 3), (10, 25, 3), (11, 15, 4), (13, 4, 4)):
             with self.subTest(tab=index):
                 self.window.tabs.setCurrentIndex(index)
                 self.settle()
@@ -211,10 +263,10 @@ class ComparisonTests(unittest.TestCase):
     def test_chart_pickers_remember_the_chart_in_each_group(self):
         tabs = self.window.tabs
         tabs.setCurrentIndex(8)
-        tabs.setCurrentIndex(12)
+        tabs.setCurrentIndex(11)
         self.settle()
         self.assertEqual(tabs.group_picker.currentData(), 2)
-        self.assertEqual(tabs.chart_picker.currentData(), 12)
+        self.assertEqual(tabs.chart_picker.currentData(), 11)
         tabs.group_picker.setCurrentIndex(0)
         self.settle()
         self.assertEqual(tabs.currentIndex(), 8)
@@ -243,42 +295,34 @@ class ComparisonTests(unittest.TestCase):
         page.canvas.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", page.canvas, x, y))
         self.assertIn(f"B · {self.dongs[1].label}", page.readout.text())
 
-    def test_rapid_navigation_and_reduced_motion_settle(self):
-        for index in (2, 0, 2, 0):
-            self.window._show_page(index)
-        for index in (7, 1, 6, 0):
+    def test_screens_switch_immediately_without_animation(self):
+        for index in (7, 1, 5, 0):
             self.window.tabs.setCurrentIndex(index)
-        QTest.qWait(450)
-        self.assertEqual(self.window.workspace_stack.currentIndex(), 0)
         self.assertEqual(self.window.tabs.currentIndex(), 0)
-        self.assertFalse(self.window.workspace_stack.overlay.isVisible())
-        self.assertFalse(self.window.tabs.stack.overlay.isVisible())
-        self.window._toggle_motion(True)
-        self.window._show_page(2)
-        self.assertFalse(self.window.workspace_stack.overlay.isVisible())
-        self.window._toggle_motion(False)
+        for index in (0, 1, 0, 1):
+            self.window.pages.setCurrentIndex(index)
+        self.assertEqual(self.window.pages.currentIndex(), 1)
+        # 화면 전환은 기본 QStackedWidget 이 맡고, 앱이 만든 애니메이션 객체는 없다.
+        for stack in (self.window.pages, self.window.tabs.stack):
+            self.assertIs(type(stack), QStackedWidget)
+        self.assertFalse(self.window.progress.isUseAni())
+        running = [ani for ani in self.window.findChildren(QAbstractAnimation)
+                   if ani.state() == QAbstractAnimation.Running]
+        self.assertEqual(running, [])
 
-    def test_insight_report_and_light_theme(self):
-        with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "report.txt"
-            with patch("hotplace.ui.QFileDialog.getSaveFileName", return_value=(str(path), "TXT")):
-                self.window._export_report()
-            report = path.read_text()
-            for dong in self.dongs[:2]:
-                self.assertIn(dong.label, report)
-            self.assertIn("상관계수", report)
-        self.window.tabs.setCurrentIndex(6)
+    def test_light_theme_is_fixed(self):
+        self.window.tabs.setCurrentIndex(5)
         self.settle()
         self.assertIs(theme(), LIGHT)
-        self.assertEqual(self.window.tabs.currentIndex(), 6)
+        self.assertEqual(self.window.tabs.currentIndex(), 5)
 
     def test_failed_background_reload_preserves_analysis(self):
         previous = self.window.population
-        self.window.population_edit.setText("population.csv")
-        self.window.code_edit.setText("codes.csv")
         with patch("hotplace.ui.load_population", side_effect=DataError("bad data")), \
              patch("hotplace.ui.QMessageBox.critical") as error:
-            self.window.start_load()
+            self.window.start_load("population.csv", "codes.csv")
+            self.assertEqual(self.window.pages.currentIndex(), 0)     # 진행 상황은 첫 화면에서 보여 준다
+            self.assertFalse(self.window.connect_button.isEnabled())
             for _ in range(100):
                 QTest.qWait(10)
                 if self.window._thread is None:
@@ -286,7 +330,9 @@ class ComparisonTests(unittest.TestCase):
             self.assertIsNone(self.window._thread)
             error.assert_called_once()
         self.assertIs(self.window.population, previous)
-        self.assertTrue(self.window.load_button.isEnabled())
+        self.assertEqual(self.window.pages.currentIndex(), 1)         # 이전 데이터의 차트로 돌아온다
+        self.assertTrue(self.window.connect_button.isEnabled())
+        self.assertTrue(self.window.reload_button.isEnabled())
 
     def test_close_cancels_worker_before_destroying_thread(self):
         entered = threading.Event()
@@ -297,10 +343,8 @@ class ComparisonTests(unittest.TestCase):
                 time.sleep(0.005)
             raise DataError("cancelled")
 
-        self.window.population_edit.setText("population.csv")
-        self.window.code_edit.setText("codes.csv")
         with patch("hotplace.ui.load_population", side_effect=loading):
-            self.window.start_load()
+            self.window.start_load("population.csv", "codes.csv")
             self.assertTrue(entered.wait(2))
             self.window.close()
             for _ in range(100):

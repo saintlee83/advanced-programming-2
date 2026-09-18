@@ -1,0 +1,13 @@
+[project]
+name = "seoul-population-kitty"
+version = "0.1.0"
+description = "서울 생활인구 비교 · Kitty (PyQt5)"
+readme = "README.md"
+requires-python = ">=3.12"
+# 저장소 루트의 환경은 PySide6 용 qfluentwidgets 를 쓴다. PyQt5 용 패키지도 같은
+# 이름(qfluentwidgets)으로 설치되어 한 환경에 함께 둘 수 없으므로 이 폴더에 따로 둔다.
+dependencies = [
+    "matplotlib>=3.8",
+    "pyqt5>=5.15,<6",
+    "pyqt-fluent-widgets>=1.11,<2",
+]

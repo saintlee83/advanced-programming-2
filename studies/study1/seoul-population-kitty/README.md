@@ -1,28 +1,31 @@
 # 서울 생활인구 비교 · Kitty
 
-PySide6 / Qt 6 기반의 서울 생활인구 분석 앱이다.
-원본 `../seoul-population/`의 분석 모델과 UI 스타일에 헬로키티 색상을 적용하며,
-상단 메뉴, 왼쪽 지역 선택·지표, 오른쪽 비교 차트로 구성한다.
+PyQt5 / Qt 5.15 기반의 서울 생활인구 분석 앱이다.
+원본 `../seoul-population/`의 분석 모델과 UI 스타일에 헬로키티 색상을 적용한다.
+사용 흐름은 **데이터 불러오기 → 차트 보기** 두 단계이며, 차트 화면은 왼쪽 지역 선택·지표, 오른쪽 비교 차트로 구성한다.
 키티 SVG는 앱 제목 옆과 첫 화면, 창 아이콘에 사용한다.
 
 ## 화면 구성
 
 | 요소 | 원본 | 이 버전 |
 |---|---|---|
-| 메뉴 | 왼쪽 세로 메뉴 | 상단 가로 메뉴 |
+| 메뉴 | 왼쪽 세로 메뉴, 4개 화면 | 없음. 데이터 불러오기 → 차트 보기 |
 | 지역 선택·지표 | 화면 위 가로 배치 | 왼쪽 세로 패널 |
 | 차트 선택 | 두 줄 탭 | 분석 분류·차트 선택기 |
 | A/B 비교 차트 | 좌우 배치 | 위아래 배치, 공통 축 유지 |
-| 비교 리포트 | 세 열 표 | 비활성화·숨김 |
-| 지역 찾기 | 상단 검색 바 | 비활성화·숨김 |
-| 파일 입력 | 세로 배치 | 두 파일을 가로로 배치 |
+| 비교 리포트 | 세 열 표 | 없음(`--check`가 텍스트로 출력) |
+| 지역 찾기 | 상단 검색 바 | 없음 |
+| 파일 입력 | ‘데이터’ 화면의 경로 입력란 | 버튼 → 파일 선택 창에서 두 CSV를 함께 선택 |
+| 히트맵 2종 | 선택 가능 | 선택 목록에서 비활성화 |
 
-14가지 분석, 데이터 검증, 지역 교환, PNG·CSV 내보내기를 지원한다.
+12가지 차트(분석 14가지 중 히트맵 2종 제외), 데이터 검증, 지역 교환, PNG·CSV 내보내기를 지원한다.
 
 ## 실행
 
 이 폴더(`studies/study1/seoul-population-kitty/`)에서 실행한다.
-의존성은 저장소 루트의 `pyproject.toml`로 관리하며, `uv`가 위쪽 폴더에서 자동으로 찾는다.
+의존성(PyQt5, PyQt-Fluent-Widgets, matplotlib)은 이 폴더의 `pyproject.toml`로 관리하며, `uv sync`가 이 폴더에 `.venv`를 만든다.
+원본 앱이 쓰는 저장소 루트 환경(PySide6)과는 분리되어 있다. PySide6용과 PyQt5용 Fluent Widgets가
+같은 패키지 이름(`qfluentwidgets`)으로 설치되어 한 환경에 함께 둘 수 없기 때문이다.
 
 ```bash
 cd studies/study1/seoul-population-kitty
@@ -30,17 +33,18 @@ uv sync
 uv run app.py
 ```
 
-저장소 루트에서는 `uv run studies/study1/seoul-population-kitty/app.py`로 실행한다.
+저장소 루트에서는 `uv run --project studies/study1/seoul-population-kitty studies/study1/seoul-population-kitty/app.py`로 실행한다.
 
-‘데이터’ 화면에서 다음 두 CSV를 지정한다.
+**데이터 불러오기** 버튼을 누르면 파일 선택 창이 열린다. 다음 두 CSV를 함께 선택한다(⌘ 또는 Ctrl 키를 누른 채 클릭).
+하나만 고르면 나머지 파일을 이어서 묻는다. 어느 쪽이 생활인구 파일인지는 첫 줄의 열 개수(32열 이상)로 가리므로 고르는 순서와 파일 이름은 상관없다.
 
 - `LOCAL_PEOPLE_DONG_YYYYMM.csv`: 기준일, 시간대, 행정동 코드, 총생활인구, 남녀 각 14개 연령대
 - `dong_code.csv`: 기존 강의자료의 한글/영문 2줄 헤더 및 행정동 코드표
 
-`HOTPLACE_DATA_DIR`, 저장소 루트의 `data/`, 형제 저장소
-`Univ_Programming1/Lectures/midterm/data/` 순으로 기본 경로를 찾는다.
-저장소 루트는 `pyproject.toml`이 있는 가장 가까운 상위 폴더다.
-명령줄 경로는 GUI의 파일 입력란에도 반영된다.
+파일 선택 창은 기본 데이터 폴더에서 열린다. `HOTPLACE_DATA_DIR`, 저장소 루트의 `data/`, 형제 저장소
+`Univ_Programming1/Lectures/midterm/data/` 순으로 찾는다. `--check`도 같은 폴더를 쓴다.
+저장소 루트 후보는 `pyproject.toml`이 있는 상위 폴더들이며, 가까운 폴더부터 차례로 확인한다.
+`--population`과 `--codes`를 모두 주면 창이 열리자마자 그 파일을 불러온다.
 
 ```bash
 uv run app.py --population /path/LOCAL_PEOPLE_DONG_201912.csv --codes /path/dong_code.csv
@@ -61,7 +65,7 @@ uv run --with 'pyinstaller>=6.16,<7' pyinstaller --noconfirm Hotplace.spec
 open dist/HotplaceKitty.app
 ```
 
-`HotplaceKitty.app`(Finder·Dock 표시 이름은 ‘서울 생활인구 비교 · Kitty’)에는 Python·PySide6·차트 리소스와 키티 SVG가 포함된다. CSV 데이터는 별도로 연결한다.
+`HotplaceKitty.app`(Finder·Dock 표시 이름은 ‘서울 생활인구 비교 · Kitty’)에는 Python·PyQt5·차트 리소스와 키티 SVG가 포함된다. CSV 데이터는 별도로 연결한다.
 앱 번들의 집계 캐시는 `~/Library/Caches/Hotplace/`에 저장한다.
 빌드 산출물 `build/`, `dist/`는 Git에서 제외한다.
 
@@ -69,12 +73,11 @@ open dist/HotplaceKitty.app
 
 | 화면 | 기능 |
 |---|---|
-| 지역 비교 | 지역 A/B 선택·교환, 네 가지 비교 지표, 4개 묶음 14개 차트, PNG·CSV 저장, 상권 유형(추정) |
-| 데이터 | 파일 지정, 백그라운드 로딩·진행률, 행정동 수·기간·관측 완전성·중복 행 표시 |
+| 데이터 불러오기 | 파일 두 개 선택, 백그라운드 로딩·진행률 |
+| 차트 보기 | 지역 A/B 선택·교환, 네 가지 비교 지표, 4개 묶음 12개 차트, PNG·CSV 저장, 상권 유형(추정), 다른 데이터 불러오기 |
 
-비교 리포트와 지역 찾기는 비활성화되어 메뉴에 표시되지 않는다. 지역 비교 화면의 ‘찾기’ 버튼도 숨긴다.
-
-첫 화면의 **데이터 불러오기**는 경로가 이미 채워져 있으면 바로 로딩을 시작하고, 아니면 ‘데이터’ 화면으로 이동한다.
+불러오기가 끝나면 차트 화면으로 바로 넘어간다. 상단 메뉴와 ‘데이터’·‘지역 찾기’·‘비교 리포트’ 화면은 없다(원본에는 있다).
+관측 완전성·중복 행 수는 `--check`로 확인한다.
 
 ### 디자인
 
@@ -87,13 +90,12 @@ open dist/HotplaceKitty.app
 - 한 지역 안의 두 계열은 선 모양과 명도로 구분한다. 히트맵은 파랑 단색 계열을 쓴다.
 - 키티 얼굴은 [SVG Crown의 SVG](https://svgcrown.com/download.php?category=hello-kitty&id=3)를
   원래 비율로 표시한다. 출처와 파일은 `hotplace/assets/`에 포함한다.
-- 상단 메뉴와 카드 배치를 유지하며, 장식 배경이나 별도 브랜드 슬로건은 사용하지 않는다.
+- 카드 배치를 유지하며, 장식 배경이나 별도 브랜드 슬로건은 사용하지 않는다.
 
-### 모션
+### 화면 전환
 
-- 페이지와 차트 전환에 220~240ms 페이드·슬라이드와 cubic easing 적용.
-- 빠르게 페이지와 차트를 바꿔도 현재 선택 상태는 즉시 반영된다. 창 크기를 바꾸면 진행 중인 전환을 정리한다.
-- 화면에 애니메이션 전환 버튼을 표시하지 않는다. 실행 전 `HOTPLACE_REDUCED_MOTION=1`로 전환 효과를 끌 수 있다.
+- 두 화면과 차트는 애니메이션 없이 즉시 바뀐다(기본 `QStackedWidget`).
+- Fluent 위젯에 들어 있는 움직임도 같은 모양을 유지한 채 끈다: 휠 스크롤, 진행 막대, 콤보 목록 펼침, 완료 알림의 미끄러짐·페이드.
 - 최소 창 크기 1080 × 740. 내용은 세로로 스크롤되며 차트 높이를 유지한다.
 - 지역과 차트 선택은 화면을 이동해도 유지된다. 동일 지역 A/B 선택도 지원한다(같다는 안내를 표시).
 
@@ -105,25 +107,28 @@ open dist/HotplaceKitty.app
 | 묶음 | 차트 |
 |---|---|
 | 하루 흐름 | 시간대 · 평일·주말 · 겹쳐 보기 · 시간대별 차이 · 흐름 비교 |
-| 요일·날짜 | 요일별 · 요일×시간 · 일별 추이 |
-| 성별·연령 | 성별 · 여성 비율 · 연령 · 연령 비중 · 연령×시간 |
+| 요일·날짜 | 요일별 · 일별 추이 |
+| 성별·연령 | 성별 · 여성 비율 · 연령 · 연령 비중 |
 | 서울 전체 | 서울 속 위치 |
+
+히트맵 두 개(요일×시간, 연령×시간)는 `hotplace/ui.py`의 `DISABLED_CHARTS = frozenset({6, 12})`로 목록에서 뺐다.
+계산·그리기 코드는 남아 있어 집합에서 번호를 지우면 다시 나타난다. 다른 차트도 같은 방법으로 뺄 수 있다(번호 = `analysis` 번호 − 1).
 
 ### 비교와 내보내기
 
 지역별로 위아래에 그리는 차트(시간대·평일/주말·성별·일별·요일별·여성 비율)는 두 지역의 축 범위를 맞춘다.
-피라미드는 같은 좌우 대칭 축, 두 히트맵은 같은 색상 범위를 사용한다.
+피라미드는 같은 좌우 대칭 축을 사용한다.
 선·막대 차트에서 마우스를 움직이면 같은 시간·날짜·요일의 실제 값을 표시한다.
-히트맵은 칸, 연령 비중은 연령대 줄, 서울 속 위치는 가장 가까운 점의 값을 표시한다.
+연령 비중은 연령대 줄, 서울 속 위치는 가장 가까운 점의 값을 표시한다.
 확대·이동도 연결되며, PNG 저장 시 마우스 가이드는 제외한다.
 
 CSV는 UTF-8 BOM으로 저장하며 양쪽 지역명과 계열을 포함한다.
 관측이 없거나 계산할 수 없는 값은 빈 셀로 내보낸다.
-히트맵 CSV는 요일 7행(또는 연령대 14행)과 A/B 각각의 24시간 열로 구성한다.
 서울 속 위치 CSV는 모든 행정동의 두 배율과 비교 지역 표시(A/B)를 담는다.
-비교 리포트의 텍스트 파일에는 기간, 지역, 비교 수치, 항목별 A/B 값과 각 항목의 계산 기준이 들어간다.
 
 ## 14가지 분석
+
+계산 메서드는 14개 모두 있다. 이 가운데 히트맵인 `analysis7`·`analysis13`은 GUI 차트 목록에서 비활성화했고 `--check`에서만 실행된다.
 
 | 메서드 | 내용 | 계산 기준 |
 |---|---|---|
@@ -154,7 +159,7 @@ CSV는 UTF-8 BOM으로 저장하며 양쪽 지역명과 계열을 포함한다.
 
 ## 비교 리포트 계산
 
-`hotplace/analytics.py`는 GUI와 독립적으로 결과를 계산한다. 화면의 비교 카드와 텍스트 리포트가 같은 항목(`ROWS`)을 쓴다.
+`hotplace/analytics.py`는 GUI와 독립적으로 결과를 계산한다. 이 버전의 GUI에는 리포트 화면이 없고, `uv run app.py --check`가 텍스트 리포트를 출력한다.
 
 - **붐비는 3시간:** 자정을 넘는 구간을 포함해 연속 3시간 평균이 가장 높은 구간.
 - **시간대별 변동:** 관측된 시간대 평균의 모집단 표준편차 ÷ 평균 × 100. 가장 적은/많은 시간도 함께 표시한다.
@@ -192,17 +197,18 @@ CSV를 한 번 읽으면서 행정동별 시간·성별·연령 합계와 날짜
 studies/study1/seoul-population-kitty/
 ├── app.py                 GUI / --check 진입점
 ├── Hotplace.spec          macOS 앱 빌드 설정
+├── pyproject.toml         PyQt5 전용 의존성
 ├── hotplace/
-│   ├── dataset.py         CSV 검증·관측 집계·품질·캐시
+│   ├── dataset.py         CSV 종류 판별·검증·관측 집계·품질·캐시
 │   ├── hotplace.py        baseline + analysis1~14 결과 모델
 │   ├── analytics.py       비교 리포트 항목·유사도·텍스트 리포트
 │   ├── plotting.py        선·막대·피라미드·점·산점도·히트맵·공통 축·마우스 판독
-│   ├── widgets.py         상단 메뉴·지표 카드·차트 선택기·항목별 비교 카드
+│   ├── widgets.py         지표 카드·차트 선택기·차트 도구 모음
 │   ├── theme.py           키티 팔레트·원본 위젯 스타일·기능 아이콘·키티 SVG
-│   └── ui.py              네 화면·로딩·검색·내보내기
+│   └── ui.py              파일 선택·로딩 → 차트 화면·내보내기
 └── tests/
     ├── test_analytics.py  수치·누락·중복·유효성·진단 회귀 검증
-    └── test_comparison.py A/B 대칭성·내보내기·화면·모션·스레드 검증
+    └── test_comparison.py 파일 선택·히트맵 비활성화·A/B 대칭성·내보내기·즉시 전환·스레드 검증
 ```
 
 ## 검증
@@ -216,6 +222,7 @@ uv run app.py --check 역삼1동 --out /tmp/hotplace-charts
 424개 행정동, 315,456개 관측, 완전성 100%로 확인했다.
 역삼1동의 기존 일평균 112,399명, 정점 14시, 주야 배율 2.15, 주말비 0.70이 유지된다.
 
-PySide6 API 참고: [Qt Signals](https://doc.qt.io/qtforpython-6/PySide6/QtCore/Signal.html),
-[Qt Animations](https://doc.qt.io/qtforpython-6/PySide6/QtCore/QPropertyAnimation.html),
+PyQt5 API 참고: [신호와 슬롯](https://www.riverbankcomputing.com/static/Docs/PyQt5/signals_slots.html),
 [Fluent Widgets 설치](https://qfluentwidgets.com/pages/install/).
+
+발표용 설명은 [Kitty ver 발표 스크립트](../kitty-presentation-script.md)에 있다.

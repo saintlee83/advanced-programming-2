@@ -379,7 +379,8 @@ def default_data_dir() -> Path | None:
     ``HOTPLACE_DATA_DIR`` 환경변수를 먼저 보고, 없으면 저장소의 ``data/`` 와
     형제 저장소인 Univ_Programming1 의 midterm 데이터 폴더를 찾아본다.
     저장소 루트는 위로 올라가며 ``pyproject.toml`` 이 있는 폴더로 정하므로
-    앱 폴더를 옮겨도 동작한다.
+    앱 폴더를 옮겨도 동작한다. 이 앱 폴더에도 PyQt5 용 ``pyproject.toml`` 이
+    있으므로, 가까운 폴더부터 차례로 저장소 루트 후보로 삼는다.
     """
     env = os.environ.get("HOTPLACE_DATA_DIR")
     if env and Path(env).is_dir():
@@ -387,17 +388,31 @@ def default_data_dir() -> Path | None:
 
     # 빌드한 앱은 실행 파일 위치에서, 소스 실행은 이 파일 위치에서 찾는다.
     start = Path(sys.executable if getattr(sys, "frozen", False) else __file__).resolve()
-    repo_root = next((parent for parent in start.parents if (parent / "pyproject.toml").is_file()), None)
-    if repo_root is None:
-        return None
-    candidates = [
-        repo_root / "data",
-        repo_root.parent / "Univ_Programming1" / "Lectures" / "midterm" / "data",
-    ]
-    for c in candidates:
-        if (c / "dong_code.csv").exists():
-            return c
+    for repo_root in start.parents:
+        if not (repo_root / "pyproject.toml").is_file():
+            continue
+        candidates = [
+            repo_root / "data",
+            repo_root.parent / "Univ_Programming1" / "Lectures" / "midterm" / "data",
+        ]
+        for c in candidates:
+            if (c / "dong_code.csv").exists():
+                return c
     return None
+
+
+def identify_csv(path: str | os.PathLike) -> str:
+    """CSV 첫 줄(제목 줄)의 열 개수로 파일 종류를 가린다.
+
+    생활인구 파일은 32열 이상, 행정동 코드표는 5열이다.
+    ``"population"`` 또는 ``"codes"`` 를 돌려준다.
+    """
+    try:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            header = next(csv.reader(f), [])
+    except (OSError, UnicodeError) as exc:
+        raise DataError(f"{Path(path).name} 파일을 읽을 수 없습니다: {exc}") from exc
+    return "population" if len(header) >= COL_END else "codes"
 
 
 def find_population_csv(data_dir: Path) -> Path | None:

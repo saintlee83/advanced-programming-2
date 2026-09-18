@@ -12,9 +12,9 @@ a = Analysis(
     pathex=[str(root)],
     binaries=[],
     datas=collect_data_files("qfluentwidgets") + [(str(root / "hotplace" / "assets"), "hotplace/assets")],
-    hiddenimports=["PySide6.QtSvg"],
+    hiddenimports=["PyQt5.QtSvg"],
     hooksconfig={"matplotlib": {"backends": ["QtAgg", "Agg"]}},
-    excludes=["PyQt5", "PyQt6", "PySide2", "tkinter"],
+    excludes=["PyQt6", "PySide2", "PySide6", "tkinter"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

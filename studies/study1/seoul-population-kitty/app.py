@@ -12,8 +12,8 @@ import os
 import sys
 from pathlib import Path
 
-# matplotlib 이 Qt 바인딩을 고를 때 PySide6 를 쓰도록 못 박는다.
-os.environ.setdefault("QT_API", "pyside6")
+# matplotlib 이 Qt 바인딩을 고를 때 PyQt5 를 쓰도록 못 박는다.
+os.environ.setdefault("QT_API", "pyqt5")
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 

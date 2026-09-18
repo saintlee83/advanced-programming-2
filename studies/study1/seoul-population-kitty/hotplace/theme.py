@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPalette, QPixmap
-from PySide6.QtSvg import QSvgRenderer
+from PyQt5.QtCore import QByteArray, Qt
+from PyQt5.QtGui import QColor, QFont, QFontDatabase, QIcon, QPainter, QPalette, QPixmap
+from PyQt5.QtSvg import QSvgRenderer
 
 
 @dataclass(frozen=True)
@@ -112,6 +112,23 @@ def make_icon(name: str, color: str | None = None, size: int = 18) -> QIcon:
     return QIcon(pixmap)
 
 
+def kitty_pixmap(width: int, height: int) -> QPixmap:
+    """키티 SVG를 원래 비율로 width × height 안에 맞춰 그린다.
+
+    Qt 5 의 QIcon.pixmap() 은 고해상도 화면 배율을 반영하지 않아 그림이 흐려진다.
+    기능 아이콘과 같은 방식으로 2배 크기로 그린 뒤 배율을 2로 표시한다.
+    """
+    renderer = QSvgRenderer(str(_KITTY_ASSET))
+    size = renderer.defaultSize().scaled(width, height, Qt.KeepAspectRatio)
+    pixmap = QPixmap(size * 2)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    pixmap.setDevicePixelRatio(2)
+    return pixmap
+
+
 def apply_theme(app, dark: bool) -> None:
     """Fluent 컴포넌트와 분석 화면을 하나의 팔레트로 갱신한다."""
     from qfluentwidgets import Theme as FluentTheme, setTheme, setThemeColor
@@ -121,7 +138,7 @@ def apply_theme(app, dark: bool) -> None:
     setTheme(FluentTheme.DARK if dark else FluentTheme.LIGHT)
     setThemeColor(t.accent)
     app.setStyle("Fusion")
-    families = set(QFontDatabase.families())
+    families = set(QFontDatabase().families())
     family = next((name for name in (
         "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans CJK KR", "NanumGothic",
     ) if name in families), app.font().family())

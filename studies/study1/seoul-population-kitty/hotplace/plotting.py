@@ -10,7 +10,7 @@ import matplotlib
 import math
 
 import matplotlib.patheffects as path_effects
-from PySide6.QtCore import QSize, Signal
+from PyQt5.QtCore import QSize, pyqtSignal
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch, Patch
@@ -92,7 +92,7 @@ def _hover(canvas, method: str, *args) -> None:
 class PlotCanvas(FigureCanvasQTAgg):
     """Qt 위젯으로 쓰는 matplotlib 캔버스."""
 
-    hovered = Signal(str)
+    hovered = pyqtSignal(str)
 
     def __init__(self, parent=None, width=7.4, height=4.4, dpi=110) -> None:
         configure_matplotlib()
