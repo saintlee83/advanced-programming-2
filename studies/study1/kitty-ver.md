@@ -8,7 +8,7 @@ Kitty 버전은 서울 생활인구의 **분석 모델을 유지하면서 화면
 
 GUI 라이브러리도 다르다. Original은 PySide6(Qt 6), Kitty는 강의에서 쓰는 **PyQt5(Qt 5.15)** 로 작성했다. 신호는 `pyqtSignal`, 슬롯은 `pyqtSlot`으로 선언한다. 화면 전환 애니메이션은 두지 않고 기본 `QStackedWidget`으로 즉시 바꾼다.
 
-화면은 **데이터 불러오기 → 차트 보기** 두 단계뿐이다. 상단 메뉴, 파일 경로를 입력하는 ‘데이터’ 화면, 숨겨 두었던 ‘지역 찾기’·‘비교 리포트’ 화면은 Kitty에서 삭제했다(Original에는 있다). 히트맵 두 개(요일×시간, 연령×시간)는 차트 선택 목록에서 비활성화했다.
+화면은 **데이터 불러오기 → 차트 보기** 두 단계뿐이다. 상단 메뉴, 파일 경로를 입력하는 ‘데이터’ 화면, 숨겨 두었던 ‘지역 찾기’·‘비교 리포트’ 화면은 Kitty에서 삭제했다(Original에는 있다). 히트맵 두 개(요일×시간, 연령×시간)는 차트 선택 목록에서 비활성화했고, ‘서울 속 위치’ 산점도와 ‘지역 교환’ 버튼은 삭제했다. 주요 지표는 카드 네 장 대신 A/B 두 칸짜리 비교표 한 장으로 보여 준다.
 
 `seoul-population-kitty/app.py`는 자신의 폴더를 `sys.path` 앞에 넣고 그 폴더의 `hotplace` 패키지를 가져온다. Original 폴더를 런타임에 참조하지 않는다.
 
@@ -17,13 +17,13 @@ GUI 라이브러리도 다르다. Original은 PySide6(Qt 6), Kitty는 강의에�
 | 파일 | Original과의 관계 | Kitty에서의 책임 |
 |---|---|---|
 | [dataset.py](seoul-population-kitty/hotplace/dataset.py) | 기본 데이터 폴더 탐색(`default_data_dir`)이 다르고, 파일 종류 판별(`identify_csv`)을 추가 | CSV 검증, 행정동 집계, 캐시 |
-| [hotplace.py](seoul-population-kitty/hotplace/hotplace.py) | 현재 내용 동일 | 14개 분석과 결과 데이터 클래스 |
+| [hotplace.py](seoul-population-kitty/hotplace/hotplace.py) | `analysis11`만 다름(여성·남성 두 계열) | 14개 분석과 결과 데이터 클래스 |
 | [analytics.py](seoul-population-kitty/hotplace/analytics.py) | 현재 내용 동일 | 진단·비교·텍스트 리포트 |
 | [__init__.py](seoul-population-kitty/hotplace/__init__.py) | 설명 문구의 GUI 라이브러리 이름만 다름 | 패키지에서 사용할 이름 내보내기 |
 | [app.py](seoul-population-kitty/app.py) | CLI 그림 크기·저장 DPI 변경 | GUI/CLI 진입 |
 | [ui.py](seoul-population-kitty/hotplace/ui.py) | 수정 | 파일 두 개 선택 → 로딩 → 좌측 지역 패널과 차트. 메뉴·데이터·검색·리포트 화면 삭제 |
 | [widgets.py](seoul-population-kitty/hotplace/widgets.py) | 수정 | 차트 선택 콤보, 세로 지표, 탐색 도구 모음. 메뉴 버튼·리포트 카드 삭제 |
-| [plotting.py](seoul-population-kitty/hotplace/plotting.py) | 수정 | 상하 비교 차트, 신호 기반 값 판독 |
+| [plotting.py](seoul-population-kitty/hotplace/plotting.py) | 수정 | 상하 비교 차트, 신호 기반 값 판독(`HOVER_ENABLED = False`로 꺼 둠) |
 | [theme.py](seoul-population-kitty/hotplace/theme.py) | 수정 | Kitty 팔레트·Qt 스타일·SVG 로딩 |
 | [assets](seoul-population-kitty/hotplace/assets/) | 추가 | Kitty SVG와 출처 기록 |
 | [Hotplace.spec](seoul-population-kitty/Hotplace.spec) | 수정 | 별도 앱 이름·번들 ID, SVG 포함 |
@@ -46,7 +46,7 @@ flowchart TD
     H --> I[동일한 14개 분석 모델]
     I --> J[Kitty draw_result]
     I --> K[csv_rows]
-    J --> L[상하 차트 / 하단 값 판독]
+    J --> L[상하 차트 / 하단 읽는 법 안내]
 ```
 
 ### 2.1 `main()`과 `run()`
@@ -101,12 +101,12 @@ Population.aggregates[코드] → DongAggregate
 | `analysis8(other)` 흐름 비교 | `LineSeries` | 지역의 시간대 평균을 100으로 정규화 |
 | `analysis9(other)` 시간대별 차이 | `HourlyGap` | 시간별 A − B |
 | `analysis10` 요일별 | `LineSeries` | 요일×시간 평균을 요일마다 다시 평균 |
-| `analysis11` 여성 비율 | `LineSeries` | 여자 ÷ 남녀 합 × 100 |
+| `analysis11` 남녀 비율 | `LineSeries` | 여성 = 여자 ÷ 남녀 합 × 100, 남성 = 100 − 여성. Kitty만 두 계열을 돌려준다(Original은 여성 한 계열) |
 | `analysis12(other)` 연령 비중 | `AgeShares` | 지역별 남녀 합산 연령 비중 |
 | `analysis13` 연령×시간 | `Heatmap` | 시간별 성별·연령 합을 분모로 연령 비중 계산 `14 × 24` |
-| `analysis14(other, codebook)` 서울 속 위치 | `CityScatter` | 매칭된 지역의 낮/밤·주말/평일 배율과 A/B 표시 |
+| `analysis14(other, codebook)` 서울 속 위치 | `CityScatter` | 매칭된 지역의 낮/밤·주말/평일 배율과 A/B 표시. **Kitty는 호출하지 않는다** |
 
-GUI에서는 단일 지역용 메서드를 A와 B에 각각 적용한 뒤 `PairedAnalysis`로 묶는다. `PAIR_TABS = {3, 7, 8, 11}`은 두 지역을 직접 받는 분석 4·8·9·12다. `CITY_TAB = 13`은 코드표까지 필요한 분석 14다.
+GUI에서는 단일 지역용 메서드를 A와 B에 각각 적용한 뒤 `PairedAnalysis`로 묶는다. `PAIR_TABS = {3, 7, 8, 11}`은 두 지역을 직접 받는 분석 4·8·9·12다. 분석 14(서울 속 위치)는 Kitty의 GUI·그리기 코드(`draw_city_scatter`)·`--check`에서 삭제했다. `hotplace.py`는 Original과 같은 파일이라 `analysis14` 메서드 자체는 남아 있다.
 
 `summary()`의 주요 지표는 시간대 평균의 평균, 가장 붐비는 시간, 낮(09~18시)/밤(00~06시), 주말/평일 배율이다. 상권 유형도 Original과 동일한 상수와 조건 순서로 결정한다. 팔레트 변경이 분류 결과에 영향을 주지는 않는다.
 
@@ -129,8 +129,7 @@ MainWindow — QVBoxLayout
          왼쪽 sidebar (292px)
            지역 A 선택
            지역 B 선택
-           지역 교환
-           주요 지표 카드 4개
+           주요 지표 비교표 (4줄 × A/B 2칸)
          오른쪽 QVBoxLayout
            동일 지역 안내
            차트 패널
@@ -149,13 +148,17 @@ Original은 최상위가 `QHBoxLayout`(왼쪽 메뉴)이고 화면이 네 개다
 ```text
 load_data()
   → _pick_files()
-      QFileDialog.getOpenFileNames()        두 CSV를 한 번에 선택
+      _ask_files(..., many=True)            두 CSV를 한 번에 선택 (항상 맨 앞에 뜨는 파일 창)
       identify_csv(path)                    첫 줄의 열 개수로 종류 판별
-      하나만 골랐으면 getOpenFileName()으로 나머지를 이어서 묻는다
+      하나만 골랐으면 _ask_files()로 나머지를 이어서 묻는다
   → start_load(population_csv, code_csv)
 ```
 
 [dataset.py](seoul-population-kitty/hotplace/dataset.py)의 `identify_csv()`는 CSV 첫 줄을 읽어 열이 32개(`COL_END`) 이상이면 `"population"`, 아니면 `"codes"`를 돌려준다. 생활인구 파일은 32열 이상, 코드표는 5열이므로 파일 이름이나 고른 순서와 무관하게 구분된다.
+
+`_file_dialog()`는 `QFileDialog`를 직접 만들고 `DontUseNativeDialog`와 `Qt.WindowStaysOnTopHint`를 켠다. 운영체제의 기본 파일 창에는 ‘항상 위’ 플래그를 줄 수 없기 때문에 Qt가 그리는 파일 창을 쓴다. 왼쪽 바로가기(`setSidebarUrls`: 컴퓨터·홈·바탕화면·문서·다운로드)를 넣고 칸 너비를 내용에 맞춘다. `run()`은 `QTranslator`로 `qtbase_ko`를 불러와 이 창의 글자를 한국어로 표시한다(불러오지 못하면 영어로 나올 뿐 동작은 같다). `_ask_files()`는 그 창을 `exec()`하고 고른 경로 목록을, 취소하면 빈 목록을 돌려준다.
+
+2026-09-19 macOS에서 창 순서를 직접 확인했다. 앱이 활성일 때 파일 창은 화면 맨 앞(창 레벨 8)에 있고, 다른 앱을 활성화하면 macOS 규칙대로 그 앱의 창이 앞으로 오며, 앱으로 돌아오면 파일 창이 다시 맨 앞에 온다. 이 동작은 기본 파일 창도 같았다. Windows에서는 같은 플래그가 `HWND_TOPMOST`가 되어 다른 앱 위에서도 유지된다(Windows 실행은 이 문서 작성 시 확인하지 않았다).
 
 `_pick_files()`는 다음 경우 불러오기를 시작하지 않는다.
 
@@ -173,13 +176,13 @@ load_data()
 
 행정동 수·기간은 `pageHeader`에 표시한다. 이전 ‘데이터’ 화면에 있던 관측 완전성·중복 행 표는 GUI에서 없어졌고, `app.py --check`가 같은 값을 출력한다.
 
-### 4.3 지역 선택기와 지표 카드
+### 4.3 지역 선택기와 지표 비교표
 
 `RegionSelector`는 배지·제목을 위쪽에 두고 자치구·행정동 콤보를 아래 행에 둔다. `region="A"` 또는 `region="B"` 속성도 지정한다.
 
 동작은 기존과 같다. `userData`에 `Dong`을 저장하고, `changed` 신호가 `_on_region_changed()`를 호출한다. `_loading`은 목록을 채우는 중 불필요한 변경 처리를 막는 내부 상태다.
 
-[widgets.py](seoul-population-kitty/hotplace/widgets.py)의 `ComparisonMetrics`는 `QVBoxLayout`에 `metricCard` 네 개를 추가한다. 각 카드 안에는 A/B 값을 가로로 놓는다. `MetricLabels`가 같은 키(`daily_avg`, `peak_hour`, `day_night_ratio`, `weekend_ratio`)로 값을 갱신하므로 레이아웃 변경이 계산 코드를 바꾸지 않는다.
+[widgets.py](seoul-population-kitty/hotplace/widgets.py)의 `ComparisonMetrics`는 `QGridLayout` 한 장짜리 비교표(`metricsTable`)다. 0번 줄은 A/B 배지, 그 아래는 구분선 한 줄과 지표 한 줄이 번갈아 온다. 0번 칸은 지표 이름, 1·2번 칸은 A·B 값이며 값은 오른쪽 맞춤, 두 값 칸의 최소 너비는 같다. `METRICS`의 각 항목은 `(요약 키, 이름, 값 표기, 설명)`이고 `"{:,.0f}명"`·`"{}시"`·`"{:.2f}배"` 표기로 단위까지 한 문자열로 만든다. `MetricLabels.update_place()`는 같은 키(`daily_avg`, `peak_hour`, `day_night_ratio`, `weekend_ratio`)로 값을 갱신하고, 계산할 수 없는 값은 `—`로 표시한다. 큰 숫자 카드 네 장을 표 한 장으로 바꿔도 계산 코드는 바뀌지 않는다.
 
 ## 5. `widgets.py`: 차트 선택과 조작
 
@@ -218,7 +221,7 @@ TAB_GROUPS = tuple(
 )
 ```
 
-`stack`에는 여전히 14장이 있어 “차트 번호 i ↔ `analysis(i+1)`” 대응이 유지된다. 목록에 없는 번호는 `_group_of`에도 없으므로 `setCurrentIndex()`가 무시한다. 집합에서 번호를 지우면 해당 차트가 다시 나타난다. 같은 방식으로 다른 차트도 뺄 수 있다.
+`stack`에는 여전히 13장(`TAB_TITLES` 전체)이 있어 “차트 번호 i ↔ `analysis(i+1)`” 대응이 유지된다. 목록에 없는 번호는 `_group_of`에도 없으므로 `setCurrentIndex()`가 무시한다. 집합에서 번호를 지우면 해당 차트가 다시 나타난다. 같은 방식으로 다른 차트도 뺄 수 있다.
 
 `chart_picker`의 행 번호와 분석 인덱스는 다르다. 예를 들어 ‘하루 흐름’ 분류의 인덱스 순서는 `(0, 1, 3, 8, 7)`이다. `_choose_chart()`는 `currentData()`에 저장된 전역 차트 인덱스를 읽으므로 분석 번호가 정확히 연결된다.
 
@@ -262,17 +265,19 @@ Original의 `subplots(1, 2, ...)`와 달리 A가 위, B가 아래에 온다. 각
 
 히트맵은 Original도 `2 × 1` 배치였다. Kitty에서도 이를 유지하고 두 지역에 같은 `vmin=0`, `vmax=peak`와 색 막대를 적용한다. 다만 Kitty GUI에서는 히트맵 두 개를 선택 목록에서 뺐으므로(5.1 참고) 이 렌더러는 `app.py --check --out`의 PNG 저장에서만 쓰인다.
 
-겹쳐 보기·정규화 흐름·시간대별 차이·연령 비중·서울 속 위치는 하나의 결과를 한 축에 그리는 비교 분석이다. 모든 차트가 두 패널인 것은 아니다.
+겹쳐 보기·정규화 흐름·시간대별 차이·연령 비중은 하나의 결과를 한 축에 그리는 비교 분석이다. 모든 차트가 두 패널인 것은 아니다.
 
 ### 6.2 결과 타입에 따른 렌더러
 
-`draw_result()`는 `PairedAnalysis`, `HourlyGap`, `AgeShares`, `CityScatter`, `AgePyramid` 순으로 타입을 검사하고 나머지는 `draw_line_series()`로 보낸다. `PairedAnalysis` 안의 `Heatmap`은 `draw_heatmaps()`로 분기한다.
+`draw_result()`는 `PairedAnalysis`, `HourlyGap`, `AgeShares`, `AgePyramid` 순으로 타입을 검사하고 나머지는 `draw_line_series()`로 보낸다. `PairedAnalysis` 안의 `Heatmap`은 `draw_heatmaps()`로 분기한다.
 
 `draw_line_series()`는 선 모양·투명도로 한 지역 안의 두 계열을 구분하고 정점에 직접 라벨을 붙인다. 단일 계열이며 기준선이 없을 때는 `fill_between(..., alpha=0.07)`로 영역을 채운다.
 
 피라미드와 차이 막대는 일반 `barh()`·`bar()`를 사용한다. Original의 `RoundedBar`, 그라데이션 `_area()`, 커서 옆 `HoverCallout`, 직접 확대·이동 메서드는 Kitty 구현에 없다.
 
-### 6.3 마우스 판독은 문자열 신호로 전달한다
+### 6.3 마우스 판독은 문자열 신호로 전달한다 (Kitty에서는 꺼 둠)
+
+이 기능은 matplotlib의 기본 기능이 아니라 `plotting.py`에 직접 구현한 것이다. Kitty는 `HOVER_ENABLED = False`로 꺼 둔다. 꺼져 있으면 `PlotCanvas`가 `motion_notify_event`를 연결하지 않고, 그리기 함수의 `_hover(...)` 등록도 건너뛰며, `widgets.READOUT_HINT`가 빈 문자열이 된다. 차트 아래 글자 칸에는 `ui.CHART_HINTS`의 읽는 법(예: 남녀 비율의 “실선은 여성, 점선은 남성”)만 표시된다. `True`로 바꾸면 아래 흐름이 다시 동작하며, `test_hover_readout_still_works_when_enabled()`가 이를 확인한다.
 
 ```python
 class PlotCanvas(FigureCanvasQTAgg):
@@ -296,9 +301,8 @@ motion_notify_event
 | 시간·날짜·요일·차이 | x좌표를 반올림해 인덱스를 정하고 A/B 값을 함께 읽음. 같은 위치의 세로 가이드 표시 |
 | 히트맵 | x/y좌표를 시간/행 인덱스로 바꿔 두 지역의 칸 값 조회 |
 | 연령 비중 | y좌표를 연령 구간으로 바꿔 A/B 비중·%p 차이 조회 |
-| 서울 속 위치 | 데이터 좌표를 화면 좌표로 변환하고 커서에서 12px 이내 가장 가까운 점 조회 |
 
-Kitty 히트맵·연령 비중·산점도의 조회 함수는 판독 문자열을 반환한다. Original의 셀 테두리·선택 점 강조까지 동일하게 구현된 것은 아니다.
+Kitty 히트맵·연령 비중의 조회 함수는 판독 문자열을 반환한다. Original의 셀 테두리·선택 점 강조까지 동일하게 구현된 것은 아니다.
 
 ### 6.4 크기·DPI와 PNG 저장 차이
 
@@ -329,7 +333,7 @@ Kitty의 GUI PNG 저장과 CLI PNG 저장은 서로 다른 DPI를 쓴다. 두 �
 
 `LIGHT`는 이 상수와 옅은 변형을 `Theme`에 담는다. `series=(KITTY_RED, KITTY_BLUE)`, `series_soft`, `heat`를 차트와 Qt 스타일이 함께 사용한다. Original에 있는 `series_ink` 필드는 Kitty의 `Theme`에는 없다.
 
-`apply_theme()`는 Fluent 테마, `QPalette`, 앱 글꼴, QSS를 갱신한다. `metricCard`, `chartControls`, `appHeader`, `fileBoard` 등의 `role`·`objectName`이 어떤 스타일을 받을지 연결한다.
+`apply_theme()`는 Fluent 테마, `QPalette`, 앱 글꼴, QSS를 갱신한다. `regionSelector`, `chartControls`, `appHeader`, `metricsTable` 등의 `role`·`objectName`이 어떤 스타일을 받을지 연결한다.
 
 `DARK`·`set_theme()` 정의는 코드에 남아 있지만, GUI 시작 시 밝음으로 고정하고 테마 전환 버튼을 만들지 않는다. 코드에 팔레트가 존재하는 것과 사용자가 전환할 수 있는 것은 구분해야 한다.
 
@@ -361,7 +365,7 @@ RegionSelector.changed
 
 `_results`는 현재 A/B에 대한 분석 결과 객체의 캐시다. `AnalysisTabs._last`는 분류별 선택 기록이다. 지역 변경 시 결과 캐시를 비워도 선택한 차트와 분류별 선택 기록은 유지한다.
 
-지역 교환은 A/B 신호를 잠시 차단하고 선택을 바꾼 뒤 한 번 갱신한다. 같은 지역도 비교할 수 있으며 관측된 시간의 차이 값은 0이 된다. 상관계수는 같은 지역이어도 패턴이 일정하면 산출할 수 없다.
+Original에 있는 ‘지역 교환’ 버튼은 Kitty에서 삭제했다. 두 지역을 바꾸려면 두 선택기에서 직접 고른다. 같은 지역도 비교할 수 있으며 관측된 시간의 차이 값은 0이 된다. 상관계수는 같은 지역이어도 패턴이 일정하면 산출할 수 없다.
 
 ### CSV 저장
 
@@ -401,7 +405,7 @@ CSV 경로가 필요하면 `--population /실제/인구.csv --codes /실제/코�
 | 테스트 파일 | 확인 내용 |
 |---|---|
 | [test_analytics.py](seoul-population-kitty/tests/test_analytics.py) | Original과 동일한 합성 데이터 분석 검증: 평균, 누락·중복, 비율, 정규화, 이상 일자, 입력 오류·취소 |
-| [test_comparison.py](seoul-population-kitty/tests/test_comparison.py) | 불러오기 → 차트 화면 이동, 파일 두 개 선택(순서 무관·하나만 고른 경우·잘못 고른 경우), 히트맵 비활성화, 공통 축·내보내기·A/B 교환, 분류별 선택 기억, 값 판독, 밝은 테마, 애니메이션 없는 즉시 전환, 스레드 정리 |
+| [test_comparison.py](seoul-population-kitty/tests/test_comparison.py) | 불러오기 → 차트 화면 이동, 파일 두 개 선택(순서 무관·하나만 고른 경우·잘못 고른 경우), 파일 선택 창의 ‘항상 맨 앞’ 설정, 히트맵 비활성화, 삭제한 기능(지역 교환·서울 속 위치)과 지표 비교표의 값 표기, 남녀 비율의 두 계열, 마우스 판독(기본 꺼짐·켜면 동작), 공통 축·내보내기·A/B 교환, 분류별 선택 기억, 값 판독, 밝은 테마, 애니메이션 없는 즉시 전환, 스레드 정리 |
 
 `test_load_button_picks_two_files_in_any_order()`는 파일 선택 창의 결과를 가짜로 넣어, 어떤 순서로 골라도 `start_load(인구, 코드표)`가 호출되는지 확인한다. `test_heatmaps_are_disabled_but_still_drawable()`은 히트맵이 목록에 없고 직접 열 수도 없지만 그리기 코드는 동작하는지 확인한다. `test_chart_pickers_remember_the_chart_in_each_group()`은 콤보 UI의 선택 상태 유지를, `test_light_theme_is_fixed()`는 시작 테마가 밝은지 확인한다.
 
@@ -414,7 +418,7 @@ Original의 직접 확대·이동 메서드를 대상으로 한 전용 테스트
 3. `load_data()` → `_pick_files()` → `identify_csv()`로 파일 두 개를 고르고, `DISABLED_CHARTS`로 어려운 차트를 목록에서 뺀다.
 4. `AnalysisTabs`의 두 콤보와 `userData`로 차트 인덱스를 정확히 연결한다.
 5. `draw_paired_analysis()`의 `subplots(2, 1)`로 A/B를 상하 배치한다.
-6. `PlotCanvas.hovered`와 `AnalysisToolbar`로 하단 값 판독·범위 조작을 제공한다.
+6. `AnalysisToolbar`로 범위 조작을 제공한다. 하단 값 판독(`PlotCanvas.hovered`)은 구현되어 있지만 `HOVER_ENABLED = False`로 꺼 둔다.
 7. `Theme`과 `make_icon("kitty")`·`kitty_pixmap()`, `Hotplace.spec`를 연결해 색상과 SVG를 실행·배포에 반영한다.
 
 기능 수정 위치도 이 구분을 따르면 된다. 계산 변경은 두 버전의 분석 파일, 차트 노출은 `DISABLED_CHARTS`, 선택 UI는 `AnalysisTabs`, 차트 표현은 `plotting.py`, 색·아이콘은 `theme.py`·`assets`에서 살핀다. 검색·리포트 화면이 다시 필요하면 Original의 `ui.py`·`widgets.py`에서 가져온다.

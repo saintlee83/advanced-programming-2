@@ -165,9 +165,8 @@ def apply_theme(app, dark: bool) -> None:
         QWidget#pageContents {{ background: transparent; }}
         QFrame#appHeader {{ background: {t.background}; border-bottom: 1px solid {t.border}; }}
         QFrame#pageHeader {{ background: {t.background}; }}
-        QFrame#metricsStrip, QFrame#observationNotes {{ background: transparent; border: none; }}
         QFrame#invitation, QFrame#searchStation, QFrame#reportSummary,
-        QFrame#fileBoard, QFrame[role="metricCard"], QFrame[role="stepCard"], QFrame[role="noteCard"] {{
+        QFrame#fileBoard, QFrame[role="stepCard"], QFrame[role="noteCard"] {{
             background: {t.surface}; border: 1px solid {t.border}; border-radius: 12px;
         }}
         QFrame#kittyStamp {{ background: transparent; border: none; }}
@@ -182,7 +181,7 @@ def apply_theme(app, dark: bool) -> None:
         QFrame#insightStrip, QFrame[role="panel"] {{
             background: {t.surface}; border: 1px solid {t.border}; border-radius: 12px;
         }}
-        QFrame[role="regionSelector"] {{ background: {t.surface}; border: 1px solid {t.border}; border-radius: 10px; }}
+        QFrame[role="regionSelector"], QFrame#metricsTable {{ background: {t.surface}; border: 1px solid {t.border}; border-radius: 10px; }}
         QFrame[role="separator"] {{ background: {t.border}; border: none; }}
         QFrame[role="tableHead"] {{ background: {t.muted}; border: none; border-top-left-radius: 11px; border-top-right-radius: 11px; }}
         QLabel {{ color: {t.ink}; background: transparent; border: none; }}
@@ -195,10 +194,9 @@ def apply_theme(app, dark: bool) -> None:
         QLabel[role="muted"] {{ color: {t.ink_soft}; font-size: 13px; }}
         QLabel[role="caption"] {{ color: {t.ink_soft}; font-size: 12px; }}
         QLabel[role="columnHead"] {{ color: {t.ink_soft}; font-size: 12px; font-weight: 600; }}
-        QLabel[role="metricValue"] {{ font-size: 24px; font-weight: 600; }}
+        QLabel[role="metricValue"] {{ font-size: 14px; font-weight: 600; }}
         QLabel[role="statValue"] {{ font-size: 20px; font-weight: 600; }}
         QLabel[role="cellValue"] {{ font-size: 15px; font-weight: 600; }}
-        QLabel[role="metricUnit"] {{ color: {t.ink_soft}; font-size: 12px; }}
         QLabel[role="regionTag"] {{ color: {t.series[0]}; font-size: 12px; font-weight: 700; }}
         QLabel[role="regionTagB"] {{ color: {t.series[1]}; font-size: 12px; font-weight: 700; }}
         QLabel[role="regionBadge"], QLabel[role="regionBadgeB"] {{ color: {t.series[0]}; background: {t.series_soft[0]}; border-radius: 6px; font-size: 12px; font-weight: 700; }}

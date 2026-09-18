@@ -14,12 +14,9 @@ from PyQt5.QtCore import QSize, pyqtSignal
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from matplotlib.patches import FancyBboxPatch, Patch
-from matplotlib.ticker import FixedLocator, FuncFormatter, MaxNLocator, MultipleLocator, NullLocator
+from matplotlib.ticker import FuncFormatter, MaxNLocator, MultipleLocator
 
-from .hotplace import (
-    OFFICE_DAY_NIGHT, RESIDENTIAL_DAY_NIGHT, WEEKDAY_BUSY, WEEKEND_BUSY,
-    AgePyramid, AgeShares, CityScatter, Heatmap, HourlyGap, LineSeries, PairedAnalysis,
-)
+from .hotplace import AgePyramid, AgeShares, Heatmap, HourlyGap, LineSeries, PairedAnalysis
 
 from .theme import DARK, LIGHT, Theme, set_theme, theme
 
@@ -83,9 +80,15 @@ def _tick(series, index: int) -> str:
     return f"{index}시"
 
 
+# 차트 위에서 마우스를 움직이면 두 지역의 값을 읽어 주는 기능(마우스 판독).
+# matplotlib 이 기본으로 주는 기능이 아니라 이 파일에서 직접 만든 것이며, Kitty 버전에서는 꺼 둔다.
+# True 로 바꾸면 다시 동작한다.
+HOVER_ENABLED = False
+
+
 def _hover(canvas, method: str, *args) -> None:
     # --check 에서 쓰는 Figure 껍데기에는 마우스 판독이 없다.
-    if hasattr(canvas, method):
+    if HOVER_ENABLED and hasattr(canvas, method):
         getattr(canvas, method)(*args)
 
 
@@ -101,8 +104,9 @@ class PlotCanvas(FigureCanvasQTAgg):
         self.setParent(parent)
         self.setMinimumHeight(250)
         self._reset_hover()
-        self.mpl_connect("motion_notify_event", self._on_hover)
-        self.mpl_connect("figure_leave_event", lambda _event: self.clear_hover())
+        if HOVER_ENABLED:                                  # 꺼져 있으면 마우스 이동을 아예 듣지 않는다
+            self.mpl_connect("motion_notify_event", self._on_hover)
+            self.mpl_connect("figure_leave_event", lambda _event: self.clear_hover())
 
     def sizeHint(self) -> QSize:
         # FigureCanvas의 기본 힌트는 현재 크기를 반환한다. 스크롤 영역에서는
@@ -283,11 +287,15 @@ def draw_line_series(canvas: PlotCanvas, series: LineSeries, *, ax=None,
             peak_text = f"{when} {_number(values[peak], series.unit)}"
             if len(series.values) > 1:
                 peak_text = f"{label} {peak_text}"
+        # 라벨은 다른 선의 반대쪽에 둔다. 남녀 비율처럼 두 선이 50%를 사이에 두고 마주 보는
+        # 차트에서 두 라벨이 가운데로 몰려 겹치지 않는다. 값이 같으면 첫 계열이 위로 간다.
+        rival = series.values[1 - i][peak] if len(series.values) == 2 else math.nan
+        above = values[peak] > rival if math.isfinite(rival) and rival != values[peak] else i == 0
         edge = len(positions) // 4
         ax.annotate(
             peak_text,
             xy=(peak, values[peak]),
-            xytext=(0, 11 if i == 0 else -19),
+            xytext=(0, 11 if above else -19),
             textcoords="offset points",
             ha="left" if peak < edge else "right" if peak >= len(positions) - edge else "center",
             fontsize=7.5 if compact else 8.5, color=theme().ink_soft, zorder=7,
@@ -576,80 +584,6 @@ def draw_age_shares(canvas, shares: AgeShares, *, show_heading: bool = True) -> 
     canvas.draw_idle()
 
 
-def draw_city_scatter(canvas, scatter: CityScatter, *, show_heading: bool = True) -> None:
-    """서울 행정동 전체를 회색 점으로, 비교 중인 두 지역을 색 점으로 그린다."""
-    import numpy as np
-    t = theme()
-    canvas.clear()
-    ax = canvas.figure.add_subplot(111)
-    _style_axes(ax)
-    ax.grid(True, axis="x", color=t.grid, linewidth=0.7, linestyle=(0, (3, 4)))
-    ax.tick_params(pad=5)
-    xs, ys = np.array(scatter.day_night, dtype=float), np.array(scatter.weekend, dtype=float)
-    if not len(xs):
-        ax.text(0.5, 0.5, "배율을 계산할 수 있는 행정동이 없습니다", transform=ax.transAxes,
-                ha="center", color=t.ink_soft)
-        canvas.draw_idle()
-        return
-
-    others = [i for i, mark in enumerate(scatter.marks) if not mark]
-    ax.scatter(xs[others], ys[others], s=16, color=t.ink_soft, alpha=0.35, linewidths=0, zorder=2)
-
-    # 낮 ÷ 밤 배율은 오른쪽으로 길게 치우쳐 있어 로그 눈금으로 그린다.
-    ax.set_xscale("log")
-    x_lo = min(xs.min(), 0.5) / 1.1
-    x_hi = max(xs.max(), OFFICE_DAY_NIGHT) * 1.2
-    y_lo = min(ys.min(), WEEKDAY_BUSY) - 0.05
-    y_hi = max(ys.max(), WEEKEND_BUSY) + 0.05
-    ax.set_xlim(x_lo, x_hi)
-    ax.set_ylim(y_lo, y_hi)
-    ticks = [v for v in (0.25, 0.5, 1, 2, 4, 8, 16) if x_lo <= v <= x_hi]
-    ax.xaxis.set_major_locator(FixedLocator(ticks))
-    ax.xaxis.set_minor_locator(NullLocator())
-    ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:g}배"))
-    ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _p: f"{v:.1f}배"))
-    ax.set_xlabel("낮 ÷ 밤 인구 (로그 눈금)", fontsize=9, color=t.ink_soft, labelpad=6)
-    ax.set_ylabel("주말 ÷ 평일 인구", fontsize=9, color=t.ink_soft, labelpad=6)
-
-    guide = dict(color=t.axis, linewidth=1, linestyle=(0, (3, 3)), zorder=1)
-    for x in (RESIDENTIAL_DAY_NIGHT, OFFICE_DAY_NIGHT):
-        ax.axvline(x, **guide)
-    for y in (WEEKDAY_BUSY, WEEKEND_BUSY):
-        ax.axhline(y, **guide)
-    zone = dict(fontsize=8, color=t.ink_soft, zorder=3, path_effects=_halo())
-    ax.text(x_lo * 1.06, WEEKEND_BUSY + 0.012, "주말 상권형 ↑", ha="left", va="bottom", **zone)
-    ax.text(x_hi / 1.06, WEEKDAY_BUSY - 0.012, "업무지구형 ↘", ha="right", va="top", **zone)
-    ax.text(RESIDENTIAL_DAY_NIGHT / 1.04, y_lo + 0.012, "← 주거지형", ha="right", va="bottom", **zone)
-
-    for i, mark in enumerate(scatter.marks):
-        if not mark:
-            continue
-        index = 0 if mark.startswith("A") else 1
-        ax.scatter([xs[i]], [ys[i]], s=90, color=t.series[index], edgecolors=t.surface,
-                   linewidths=1.8, zorder=5)
-        ax.annotate(f"{mark} · {scatter.names[i]}", xy=(xs[i], ys[i]),
-                    xytext=(9, 7 if index == 0 else -9), textcoords="offset points",
-                    va="bottom" if index == 0 else "top", fontsize=9, fontweight="bold",
-                    color=t.ink, zorder=6, path_effects=_halo())
-
-    if show_heading:
-        _heading(ax, scatter.title, scatter.note)
-
-    def lookup(event):
-        points = ax.transData.transform(np.column_stack([xs, ys]))
-        distance = np.hypot(points[:, 0] - event.x, points[:, 1] - event.y)
-        nearest = int(distance.argmin())
-        if distance[nearest] > 12:
-            return None
-        mark = f"{scatter.marks[nearest]} · " if scatter.marks[nearest] else ""
-        return nearest, (f"{mark}{scatter.names[nearest]}  ·  낮 ÷ 밤 {xs[nearest]:.2f}배"
-                         f"  ·  주말 ÷ 평일 {ys[nearest]:.2f}배")
-
-    _hover(canvas, "set_hover_lookup", [ax], lookup)
-    canvas.figure.set_layout_engine("tight", pad=1.8)
-    canvas.draw_idle()
-
-
 def draw_result(canvas, result, *, show_heading: bool = True) -> None:
     """결과 종류에 맞는 그리기 함수를 고른다."""
     if isinstance(result, PairedAnalysis):
@@ -658,8 +592,6 @@ def draw_result(canvas, result, *, show_heading: bool = True) -> None:
         draw_gap(canvas, result, show_heading=show_heading)
     elif isinstance(result, AgeShares):
         draw_age_shares(canvas, result, show_heading=show_heading)
-    elif isinstance(result, CityScatter):
-        draw_city_scatter(canvas, result, show_heading=show_heading)
     elif isinstance(result, AgePyramid):
         draw_age_pyramid(canvas, result)
     else:

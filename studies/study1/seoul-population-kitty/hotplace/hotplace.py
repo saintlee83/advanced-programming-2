@@ -12,7 +12,7 @@
     analysis4  두 지역의 시간대별 평균 생활인구 비교
     analysis5  연령대별 인구 피라미드 (추가 분석)
     analysis6~8   일별 추이 · 요일×시간 · 규모를 맞춘 하루 흐름
-    analysis9~14  시간대별 차이 · 요일별 · 여성 비율 · 연령 비중 · 연령×시간 · 서울 속 위치
+    analysis9~14  시간대별 차이 · 요일별 · 남녀 비율 · 연령 비중 · 연령×시간 · 서울 속 위치
 """
 
 from __future__ import annotations
@@ -353,13 +353,14 @@ class Hotplace:
                           note=f"요일마다 시간대별 평균의 평균 · 관측한 날 수 {counts}")
 
     def analysis11(self) -> LineSeries:
-        """시간대별 여성 비율 (성별·연령 집계 기준)."""
+        """시간대별 남녀 비율 (성별·연령 집계 기준). 남성 비율은 100 − 여성 비율이다."""
         male, female = self.mean_by_gender()
         share = [f / (m + f) * 100 if math.isfinite(m + f) and m + f > 0 else float("nan")
                  for m, f in zip(male, female)]
-        return LineSeries(f"{self.label} 시간대별 여성 비율", ["여성 비율"], [share],
-                          ylabel="여성 비율(%)", unit="%", reference=50,
-                          note="성별·연령 집계 중 여성의 비율 · 점선은 50%")
+        return LineSeries(f"{self.label} 시간대별 남녀 비율", ["여성", "남성"],
+                          [share, [100 - value for value in share]],
+                          ylabel="비율(%)", unit="%", reference=50,
+                          note="성별·연령 집계 중 여성·남성의 비율 · 두 선은 50% 점선을 기준으로 대칭")
 
     def age_shares(self) -> list[float]:
         """연령대별 비중(%). 남녀를 합쳐 전체를 100으로 본다."""

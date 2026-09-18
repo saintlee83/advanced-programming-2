@@ -41,7 +41,7 @@ def resolve_paths(args) -> tuple[str, str]:
 
 
 def run_check(args) -> int:
-    """GUI 없이 데이터 로딩과 분석 1~14를 한 번씩 실행해 본다."""
+    """GUI 없이 데이터 로딩과 분석 1~13을 한 번씩 실행해 본다."""
     from hotplace.hotplace import Hotplace, PairedAnalysis, rank_by_daily_average, summary_text
     from hotplace.analytics import report_text
     from hotplace.plotting import configure_matplotlib, theme
@@ -93,10 +93,9 @@ def run_check(args) -> int:
         "analysis8": place_a.analysis8(place_b),
         "analysis9": place_a.analysis9(place_b),
         "analysis10": PairedAnalysis("요일별 평균 비교", regions, (place_a.analysis10(), place_b.analysis10())),
-        "analysis11": PairedAnalysis("시간대별 여성 비율 비교", regions, (place_a.analysis11(), place_b.analysis11())),
+        "analysis11": PairedAnalysis("시간대별 남녀 비율 비교", regions, (place_a.analysis11(), place_b.analysis11())),
         "analysis12": place_a.analysis12(place_b),
         "analysis13": PairedAnalysis("시간대별 연령 구성 비교", regions, (place_a.analysis13(), place_b.analysis13())),
-        "analysis14": place_a.analysis14(place_b, codebook),
     }
     for name, result in results.items():
         print(f"  {name}: {result.title}")
@@ -124,7 +123,7 @@ def run_check(args) -> int:
             holder.figure.savefig(path, dpi=160, facecolor=theme().surface)
             print(f"  저장: {path}")
 
-    print("\n분석 1~14 정상 동작 확인.")
+    print("\n분석 1~13 정상 동작 확인.")
     return 0
 
 

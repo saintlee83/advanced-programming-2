@@ -1,4 +1,4 @@
-"""세로 지표 카드, 차트 선택기, 차트 한 장을 담는 화면 부품."""
+"""지표 비교표, 차트 선택기, 차트 한 장을 담는 화면 부품."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import math
 from PyQt5.QtCore import QSize, Qt, pyqtSignal
 from PyQt5.QtGui import QPalette
 from PyQt5.QtWidgets import (
-    QApplication, QFrame, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget,
+    QApplication, QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QStackedWidget,
     QVBoxLayout, QWidget,
 )
 from matplotlib.backends.backend_qtagg import NavigationToolbar2QT
@@ -15,7 +15,7 @@ from qfluentwidgets import ComboBox as FluentComboBox, MenuAnimationType
 from qfluentwidgets.components.widgets.combo_box import ComboBoxMenu
 
 from .hotplace import Hotplace, summary_text
-from .plotting import PlotCanvas
+from .plotting import HOVER_ENABLED, PlotCanvas
 from .theme import make_icon
 
 
@@ -50,71 +50,63 @@ def region_badge(region: str) -> QLabel:
     return badge
 
 
+# (요약 통계의 키, 표에 보일 이름, 값 표기, 마우스를 올렸을 때의 설명)
+METRICS = (
+    ("daily_avg", "일평균 생활인구", "{:,.0f}명", "시간대별 평균 인구의 평균입니다. 하루 방문자 수가 아닙니다."),
+    ("peak_hour", "가장 붐비는 시간", "{}시", "평균 인구가 가장 많은 시간대입니다."),
+    ("day_night_ratio", "낮 ÷ 밤 인구", "{:.2f}배", "낮(09~18시) 평균 ÷ 밤(00~06시) 평균. 1보다 크면 낮에 사람이 더 많습니다."),
+    ("weekend_ratio", "주말 ÷ 평일 인구", "{:.2f}배", "주말 평균 ÷ 평일 평균. 1보다 작으면 평일에 더 붐빕니다."),
+)
+
+
 class MetricLabels:
-    """각 지표 안에 배치된 한 지역의 값을 함께 갱신한다."""
+    """비교표에서 한 지역(한 칸)의 값들을 함께 갱신한다."""
 
     def __init__(self) -> None:
         self.values: dict[str, QLabel] = {}
 
     def update_place(self, place: Hotplace | None) -> None:
-        if place is None:
-            for value in self.values.values():
-                value.setText("—")
-            return
-        stats = place.summary()
-        self.values["daily_avg"].setText(f"{stats['daily_avg']:,.0f}")
-        self.values["peak_hour"].setText(f"{stats['peak_hour']}")
-        for key in ("day_night_ratio", "weekend_ratio"):
-            value = stats[key]
-            self.values[key].setText(f"{value:.2f}" if math.isfinite(value) else "—")
-        for value in self.values.values():
-            value.setToolTip(summary_text(place))
-
-
-METRICS = (
-    ("daily_avg", "일평균 생활인구", "명", "시간대별 평균 인구의 평균입니다. 하루 방문자 수가 아닙니다."),
-    ("peak_hour", "가장 붐비는 시간", "시", "평균 인구가 가장 많은 시간대입니다."),
-    ("day_night_ratio", "낮 ÷ 밤 인구", "배", "낮(09~18시) 평균 ÷ 밤(00~06시) 평균. 1보다 크면 낮에 사람이 더 많습니다."),
-    ("weekend_ratio", "주말 ÷ 평일 인구", "배", "주말 평균 ÷ 평일 평균. 1보다 작으면 평일에 더 붐빕니다."),
-)
+        stats = place.summary() if place else {}
+        for key, _title, pattern, _help in METRICS:
+            number = stats.get(key, math.nan)
+            self.values[key].setText(pattern.format(number) if math.isfinite(number) else "—")
+            self.values[key].setToolTip(summary_text(place) if place else "")
 
 
 class ComparisonMetrics(QFrame):
-    """지역 선택 아래에 놓는 세로 지표 카드 네 장."""
+    """지역 선택 아래에 놓는 비교표. 줄은 지표, 칸은 지역 A·B 다."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setObjectName("metricsStrip")
+        self.setObjectName("metricsTable")
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.region_a = MetricLabels()
         self.region_b = MetricLabels()
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(9)
-        for index, (key, title, unit, help_text) in enumerate(METRICS):
-            card = QFrame()
-            card.setProperty("role", "metricCard")
-            cell = QVBoxLayout(card)
-            cell.setContentsMargins(14, 10, 14, 10)
-            cell.setSpacing(6)
-            heading = label(title, "field")
-            heading.setToolTip(help_text)
-            cell.addWidget(heading)
-            row = QHBoxLayout()
-            row.setSpacing(8)
-            for region, holder in (("A", self.region_a), ("B", self.region_b)):
-                number_row = QHBoxLayout()
-                number_row.setSpacing(4)
-                number_row.addWidget(label(region, "regionTag" if region == "A" else "regionTagB"), 0, Qt.AlignBottom)
+        grid = QGridLayout(self)
+        grid.setContentsMargins(14, 10, 14, 6)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(0)
+        grid.setColumnStretch(0, 1)
+        grid.setRowMinimumHeight(0, 36)
+        for column, region in enumerate("AB", start=1):           # 머리 줄: 지역 선택과 같은 A·B 표시
+            grid.addWidget(region_badge(region), 0, column, Qt.AlignRight | Qt.AlignVCenter)
+            grid.setColumnMinimumWidth(column, 70)                # 값이 바뀌어도 두 칸의 너비가 같게 유지된다
+        for index, (key, title, _pattern, help_text) in enumerate(METRICS):
+            row = index * 2 + 1                                    # 구분선 한 줄 + 지표 한 줄
+            line = QFrame()
+            line.setProperty("role", "separator")
+            line.setFixedHeight(1)
+            grid.addWidget(line, row, 0, 1, 3)
+            name = label(title, "muted")
+            name.setToolTip(help_text)
+            grid.addWidget(name, row + 1, 0)
+            grid.setRowMinimumHeight(row + 1, 38)
+            for column, (region, holder) in enumerate((("A", self.region_a), ("B", self.region_b)), start=1):
                 value = label("—", "metricValue")
+                value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)   # 숫자는 오른쪽 맞춤이라야 자릿수가 비교된다
                 value.setAccessibleName(f"지역 {region} {title}")
                 holder.values[key] = value
-                number_row.addWidget(value, 0, Qt.AlignBottom)
-                number_row.addWidget(label(unit, "metricUnit"), 0, Qt.AlignBottom)
-                number_row.addStretch()
-                row.addLayout(number_row, 1)
-            cell.addLayout(row)
-            layout.addWidget(card)
+                grid.addWidget(value, row + 1, column)
 
 
 class AnalysisToolbar(NavigationToolbar2QT):
@@ -129,7 +121,7 @@ class AnalysisToolbar(NavigationToolbar2QT):
     )
 
 
-READOUT_HINT = "차트 위에 마우스를 올리면 두 지역의 값이 여기에 표시됩니다."
+READOUT_HINT = "차트 위에 마우스를 올리면 두 지역의 값이 여기에 표시됩니다." if HOVER_ENABLED else ""
 
 
 class AnalysisTab(QWidget):

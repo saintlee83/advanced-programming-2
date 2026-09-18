@@ -7,12 +7,15 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from PyQt5.QtCore import QObject, QSize, Qt, QThread, QTimer, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import (
+    QLibraryInfo, QObject, QSize, QStandardPaths, Qt, QThread, QTimer, QTranslator, QUrl,
+    pyqtSignal, pyqtSlot,
+)
 from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import (
     QAbstractButton, QApplication, QDialog, QDialogButtonBox, QFileDialog, QFrame,
-    QHBoxLayout, QLabel, QLayout, QMessageBox, QPlainTextEdit, QSizePolicy,
-    QStackedWidget, QVBoxLayout, QWidget,
+    QHBoxLayout, QHeaderView, QLabel, QLayout, QMessageBox, QPlainTextEdit, QSizePolicy,
+    QSplitter, QStackedWidget, QTreeView, QVBoxLayout, QWidget,
 )
 from qfluentwidgets import (
     InfoBar, InfoBarPosition, PrimaryPushButton, ProgressBar, PushButton,
@@ -31,16 +34,15 @@ from .widgets import (
 
 # 차트 번호 i 는 Hotplace.analysis(i + 1) 에 대응한다.
 TAB_TITLES = ("시간대", "평일·주말", "성별", "겹쳐 보기", "연령", "일별 추이", "요일×시간", "흐름 비교",
-              "시간대별 차이", "요일별", "여성 비율", "연령 비중", "연령×시간", "서울 속 위치")
+              "시간대별 차이", "요일별", "남녀 비율", "연령 비중", "연령×시간")
 CHART_TITLES = ("시간대별 평균 인구", "평일과 주말의 시간대별 인구", "남녀 시간대별 인구", "두 지역을 한 차트에",
                 "연령대별 인구 구성", "일별 평균과 7일 이동평균", "요일·시간대별 평균 인구", "하루 흐름 비교 (지역 평균 = 100)",
-                "시간대별 인구 차이 (A − B)", "요일별 평균 인구", "시간대별 여성 비율", "연령대별 비중 비교",
-                "시간대별 연령 구성", "서울 행정동 속 두 지역의 위치")
+                "시간대별 인구 차이 (A − B)", "요일별 평균 인구", "시간대별 남녀 비율", "연령대별 비중 비교",
+                "시간대별 연령 구성")
 ALL_GROUPS = (
     ("하루 흐름", (0, 1, 3, 8, 7)),
     ("요일·날짜", (9, 6, 5)),
     ("성별·연령", (2, 10, 4, 11, 12)),
-    ("서울 전체", (13,)),
 )
 # 히트맵(요일×시간, 연령×시간)은 선택 목록에서 뺀다. 계산·그리기 코드는 남아 있어
 # 이 집합에서 번호를 지우면 다시 나타난다.
@@ -50,14 +52,13 @@ TAB_GROUPS = tuple(
     for name, charts in ALL_GROUPS
 )
 PAIR_TABS = {3, 7, 8, 11}      # 두 지역을 한 결과로 계산하는 분석
-CITY_TAB = 13
-CHART_HEIGHTS = {4: 760, 6: 680, 11: 620, 12: 880, 13: 680}
+CHART_HEIGHTS = {4: 760, 6: 680, 11: 620, 12: 880}
+# 차트 아래에 보여 줄 읽는 법. 없는 차트는 READOUT_HINT(마우스 판독 안내, 꺼져 있으면 빈칸)를 쓴다.
 CHART_HINTS = {
     4: "왼쪽은 남자, 오른쪽은 여자 · 두 지역이 같은 축을 씁니다",
-    6: "두 지역이 같은 색 범위를 씁니다 · 칸에 마우스를 올리면 값이 표시됩니다",
-    11: "연령대 줄에 마우스를 올리면 두 지역의 비중이 표시됩니다",
-    12: "두 지역이 같은 색 범위를 씁니다 · 칸에 마우스를 올리면 값이 표시됩니다",
-    13: "점에 마우스를 올리면 행정동 이름과 배율이 표시됩니다",
+    6: "두 지역이 같은 색 범위를 씁니다",
+    10: "실선은 여성, 점선은 남성 · 50% 선보다 위에 있는 쪽이 더 많습니다",
+    12: "두 지역이 같은 색 범위를 씁니다",
 }
 PAGE_TITLE = "지역 비교"
 PAGE_NOTE = "두 행정동의 생활인구를 같은 기준, 같은 축으로 비교합니다."
@@ -356,8 +357,7 @@ class MainWindow(QWidget):
         어느 쪽이 생활인구 파일인지는 identify_csv() 가 첫 줄의 열 개수로 가린다.
         그래서 고르는 순서나 파일 이름은 상관없다.
         """
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, "생활인구 CSV와 행정동 코드표를 함께 선택하세요", self._last_dir, CSV_FILTER)
+        paths = self._ask_files("생활인구 CSV와 행정동 코드표를 함께 선택하세요", many=True)
         if not paths:
             return None
         self._last_dir = str(Path(paths[0]).parent)
@@ -376,7 +376,7 @@ class MainWindow(QWidget):
             for kind, caption in FILE_KINDS.items():      # 하나만 골랐으면 나머지를 이어서 묻는다
                 if kind in files:
                     continue
-                path, _ = QFileDialog.getOpenFileName(self, f"{caption}도 선택하세요", self._last_dir, CSV_FILTER)
+                path = next(iter(self._ask_files(f"{caption}도 선택하세요")), "")
                 if not path:
                     return None
                 if identify_csv(path) != kind:
@@ -387,6 +387,34 @@ class MainWindow(QWidget):
             QMessageBox.critical(self, "파일을 읽을 수 없습니다", str(exc))
             return None
         return files
+
+    def _file_dialog(self, caption: str, many: bool = False) -> QFileDialog:
+        """항상 맨 앞에 뜨는 파일 선택 창을 만든다.
+
+        운영체제의 기본 파일 창에는 ‘항상 위’ 옵션을 줄 수 없다. 그래서 Qt 가 직접 그리는
+        파일 창을 쓰고 WindowStaysOnTopHint 를 켠다.
+        """
+        dialog = QFileDialog(self, caption, self._last_dir, CSV_FILTER)
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+        dialog.setWindowFlag(Qt.WindowStaysOnTopHint, True)
+        dialog.setFileMode(QFileDialog.ExistingFiles if many else QFileDialog.ExistingFile)
+        dialog.resize(900, 600)
+        # 왼쪽에 자주 쓰는 폴더(컴퓨터·홈·바탕화면·문서·다운로드) 바로가기를 둔다.
+        places = (QStandardPaths.HomeLocation, QStandardPaths.DesktopLocation,
+                  QStandardPaths.DocumentsLocation, QStandardPaths.DownloadLocation)
+        dialog.setSidebarUrls([QUrl("file:")] + [QUrl.fromLocalFile(QStandardPaths.writableLocation(place))
+                                                 for place in places])
+        # 바로가기 이름과 파일 목록의 이름·크기 칸이 잘리지 않도록 넓힌다.
+        dialog.findChild(QSplitter).setSizes([170, 730])
+        dialog.findChild(QTreeView).header().setSectionResizeMode(QHeaderView.ResizeToContents)
+        return dialog
+
+    def _ask_files(self, caption: str, many: bool = False) -> list[str]:
+        """파일 선택 창을 띄우고 고른 경로들을 돌려준다. 취소하면 빈 목록."""
+        dialog = self._file_dialog(caption, many)
+        paths = dialog.selectedFiles() if dialog.exec() == QDialog.Accepted else []
+        dialog.deleteLater()                              # 부를 때마다 새로 만드므로 쓰고 나면 지운다
+        return paths
 
     def start_load(self, population_csv: str, code_csv: str) -> None:
         if self._thread is not None:
@@ -499,15 +527,6 @@ class MainWindow(QWidget):
         self.region_b.changed.connect(self._on_region_changed)
         selectors.addWidget(self.region_a)
         selectors.addWidget(self.region_b)
-        actions = QHBoxLayout()
-        actions.setSpacing(8)
-        self.swap_button = self._button("지역 교환", "compare")
-        self.swap_button.setToolTip("지역 A와 B 바꾸기")
-        self.swap_button.setAccessibleName("지역 A와 B 바꾸기")
-        self.swap_button.setEnabled(False)
-        self.swap_button.clicked.connect(self._swap_regions)
-        actions.addWidget(self.swap_button, 1)
-        selectors.addLayout(actions)
         selectors.addSpacing(10)
         selectors.addWidget(_label("주요 지표", "section"))
         metrics = ComparisonMetrics()
@@ -593,20 +612,6 @@ class MainWindow(QWidget):
         self._update_summary()
         self._render_current()
 
-    def _swap_regions(self) -> None:
-        dong_a, dong_b = self.region_a.current(), self.region_b.current()
-        if dong_a is None or dong_b is None:
-            return
-        self.region_a.blockSignals(True)
-        self.region_b.blockSignals(True)
-        try:
-            self.region_a.set_dong(dong_b)
-            self.region_b.set_dong(dong_a)
-        finally:
-            self.region_a.blockSignals(False)
-            self.region_b.blockSignals(False)
-        self._on_region_changed()
-
     def _hotplaces(self) -> tuple[Hotplace | None, Hotplace | None]:
         if self.population is None:
             return None, None
@@ -636,8 +641,6 @@ class MainWindow(QWidget):
             method = f"analysis{index + 1}"
             if index in PAIR_TABS:
                 result = getattr(place_a, method)(place_b)
-            elif index == CITY_TAB:
-                result = place_a.analysis14(place_b, self.codebook)
             else:
                 result = PairedAnalysis(
                     title=f"{place_a.label} · {place_b.label} {TAB_TITLES[index]} 비교",
@@ -663,7 +666,6 @@ class MainWindow(QWidget):
         for place, field in ((place_a, self.insight_a), (place_b, self.insight_b)):
             field.setText(f"{place.name} · {place.summary()['character']}" if place else "—")
         self.summary_button.setEnabled(place_a is not None or place_b is not None)
-        self.swap_button.setEnabled(place_a is not None and place_b is not None)
         self.overview_note.setVisible(bool(place_a and place_b and place_a.code == place_b.code))
 
     def _show_summary(self) -> None:
@@ -763,6 +765,10 @@ def run(population_csv=None, code_csv=None) -> int:
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
+    # Qt 가 그리는 파일 선택 창의 글자(열기·취소·이름·크기 등)를 한국어로 표시한다.
+    translator = QTranslator(app)
+    if translator.load("qtbase_ko", QLibraryInfo.location(QLibraryInfo.TranslationsPath)):
+        app.installTranslator(translator)
     window = MainWindow()
     window.show()
     if population_csv and code_csv:                       # 명령줄로 두 경로를 주면 바로 불러온다

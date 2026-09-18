@@ -13,16 +13,17 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_API", "pyqt5")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from PyQt5.QtCore import QAbstractAnimation
-from PyQt5.QtWidgets import QApplication, QStackedWidget
+from PyQt5.QtCore import QAbstractAnimation, Qt
+from PyQt5.QtWidgets import QApplication, QFileDialog, QStackedWidget
 from PyQt5.QtTest import QTest
 from matplotlib.backend_bases import MouseEvent
+from matplotlib.text import Annotation
 
 from hotplace.dataset import COL_END, CodeBook, DataError, Dong, DongAggregate, Population, identify_csv
-from hotplace.hotplace import Hotplace, PairedAnalysis
+from hotplace.hotplace import Hotplace, LineSeries, PairedAnalysis
 from hotplace.plotting import draw_result
 from hotplace.theme import LIGHT, theme
-from hotplace.ui import CITY_TAB, DISABLED_CHARTS, MainWindow, OVERLAY_TAB, TAB_GROUPS
+from hotplace.ui import DISABLED_CHARTS, MainWindow, OVERLAY_TAB, TAB_GROUPS, TAB_TITLES
 
 
 class ComparisonTests(unittest.TestCase):
@@ -46,13 +47,17 @@ class ComparisonTests(unittest.TestCase):
                 aggregate.weekend[hour] = total * 0.4
                 aggregate.age[hour] = [total / 28] * 28
             aggregates[dong.code] = aggregate
-        population = Population(aggregates, {"20260102", "20260103"}, {"20260102"})
-        self.window = MainWindow()
-        self.window.show()
-        self.window._on_loaded(population, CodeBook(self.dongs))
-        self.window.region_a.set_dong(self.dongs[0])
-        self.window.region_b.set_dong(self.dongs[1])
+        self.population = Population(aggregates, {"20260102", "20260103"}, {"20260102"})
+        self.window = self.open_window()
+
+    def open_window(self):
+        window = MainWindow()
+        window.show()
+        window._on_loaded(self.population, CodeBook(self.dongs))
+        window.region_a.set_dong(self.dongs[0])
+        window.region_b.set_dong(self.dongs[1])
         self.settle()
+        return window
 
     def tearDown(self):
         self.window.close()
@@ -84,7 +89,9 @@ class ComparisonTests(unittest.TestCase):
                 before = self.window._results[index]
                 metrics_a = [value.text() for value in self.window.metrics_a.values.values()]
                 metrics_b = [value.text() for value in self.window.metrics_b.values.values()]
-                self.window.swap_button.click()
+                dong_a, dong_b = self.window.region_a.current(), self.window.region_b.current()
+                self.window.region_a.set_dong(dong_b)               # 두 목록에서 직접 서로 바꿔 고른다
+                self.window.region_b.set_dong(dong_a)
                 self.settle()
                 after = self.window._results[index]
                 self.assertEqual(self.window.tabs.currentIndex(), index)
@@ -150,16 +157,16 @@ class ComparisonTests(unittest.TestCase):
             self.assertEqual(identify_csv(population), "population")
             self.assertEqual(identify_csv(codes), "codes")
             for picked in ([population, codes], [codes, population]):
-                with patch("hotplace.ui.QFileDialog.getOpenFileNames", return_value=(picked, "")), \
+                with patch.object(self.window, "_ask_files", return_value=picked), \
                      patch.object(self.window, "start_load") as start:
                     self.window.load_data()
                 start.assert_called_once_with(population, codes)
             # 하나만 고르면 나머지 파일을 이어서 묻는다.
-            with patch("hotplace.ui.QFileDialog.getOpenFileNames", return_value=([codes], "")), \
-                 patch("hotplace.ui.QFileDialog.getOpenFileName", return_value=(population, "")) as second, \
+            with patch.object(self.window, "_ask_files", side_effect=[[codes], [population]]) as ask, \
                  patch.object(self.window, "start_load") as start:
                 self.window.load_data()
-            self.assertIn("생활인구", second.call_args.args[1])
+            self.assertEqual(ask.call_count, 2)
+            self.assertIn("생활인구", ask.call_args.args[0])
             start.assert_called_once_with(population, codes)
 
     def test_load_button_rejects_wrong_selections(self):
@@ -168,22 +175,55 @@ class ComparisonTests(unittest.TestCase):
             cases = ([], [codes, codes], [population, codes, codes])
             for picked in cases:
                 with self.subTest(picked=len(picked)), \
-                     patch("hotplace.ui.QFileDialog.getOpenFileNames", return_value=(picked, "")), \
+                     patch.object(self.window, "_ask_files", return_value=picked), \
                      patch("hotplace.ui.QMessageBox.warning") as warning, \
                      patch.object(self.window, "start_load") as start:
                     self.window.load_data()
                     start.assert_not_called()
                     self.assertEqual(warning.called, bool(picked))
-            with patch("hotplace.ui.QFileDialog.getOpenFileNames", return_value=([codes], "")), \
-                 patch("hotplace.ui.QFileDialog.getOpenFileName", return_value=("", "")), \
+            with patch.object(self.window, "_ask_files", side_effect=[[codes], []]), \
                  patch.object(self.window, "start_load") as start:
                 self.window.load_data()                       # 두 번째 창에서 취소
             start.assert_not_called()
 
+    def test_file_dialog_stays_on_top(self):
+        many = self.window._file_dialog("두 파일 선택", many=True)
+        one = self.window._file_dialog("한 파일 선택")
+        try:
+            for dialog in (many, one):
+                self.assertTrue(dialog.windowFlags() & Qt.WindowStaysOnTopHint)     # 항상 맨 앞
+                self.assertTrue(dialog.testOption(QFileDialog.DontUseNativeDialog))  # 그 옵션이 통하는 Qt 창
+                self.assertIs(dialog.parent(), self.window)
+                self.assertEqual(dialog.nameFilters(), ["CSV 파일 (*.csv)", "모든 파일 (*)"])
+            self.assertEqual(many.fileMode(), QFileDialog.ExistingFiles)
+            self.assertEqual(one.fileMode(), QFileDialog.ExistingFile)
+            self.assertEqual(len(many.sidebarUrls()), 5)
+            with patch.object(QFileDialog, "exec", return_value=QFileDialog.Rejected):
+                self.assertEqual(self.window._ask_files("취소"), [])
+            with patch.object(QFileDialog, "exec", return_value=QFileDialog.Accepted), \
+                 patch.object(QFileDialog, "selectedFiles", return_value=["a.csv", "b.csv"]):
+                self.assertEqual(self.window._ask_files("선택", many=True), ["a.csv", "b.csv"])
+        finally:
+            many.deleteLater()
+            one.deleteLater()
+
+    def test_removed_features_are_gone(self):
+        self.assertEqual(len(TAB_TITLES), 13)                     # ‘서울 속 위치’ 차트 삭제
+        self.assertNotIn("서울 전체", [name for name, _charts in TAB_GROUPS])
+        self.assertEqual(len(self.window.tab_pages), 13)
+        self.assertFalse(hasattr(self.window, "swap_button"))     # 지역 교환 삭제
+        values = self.window.metrics_a.values                      # 주요 지표는 단위까지 붙은 표
+        stats = Hotplace(self.dongs[0], self.window.population).summary()
+        self.assertEqual(values["daily_avg"].text(), f"{stats['daily_avg']:,.0f}명")
+        self.assertEqual(values["peak_hour"].text(), "23시")
+        self.assertTrue(values["day_night_ratio"].text().endswith("배"))
+        self.window.metrics_a.update_place(None)
+        self.assertEqual({value.text() for value in values.values()}, {"—"})
+
     def test_heatmaps_are_disabled_but_still_drawable(self):
         self.assertEqual(DISABLED_CHARTS, {6, 12})
         offered = {chart for _name, charts in TAB_GROUPS for chart in charts}
-        self.assertEqual(offered, set(range(14)) - DISABLED_CHARTS)
+        self.assertEqual(offered, set(range(13)) - DISABLED_CHARTS)
         tabs = self.window.tabs
         tabs.setCurrentIndex(5)
         for index in DISABLED_CHARTS:
@@ -204,26 +244,56 @@ class ComparisonTests(unittest.TestCase):
         top, bottom = canvas.figure.axes[:2]
         self.assertEqual(top.images[0].get_clim(), bottom.images[0].get_clim())
 
-    def test_hover_reads_both_regions_and_stays_out_of_export(self):
+    def test_hover_readout_is_disabled_by_default(self):
         page = self.window.tab_pages[0]
         canvas = page.canvas
         canvas.draw()
         left = canvas.figure.axes[0]
         x, y = left.transData.transform((12, left.get_ylim()[1] / 2))
         canvas.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", canvas, x, y))
-        result = self.window._results[0]
-        for region, series in zip("AB", result.analyses):
-            self.assertIn(f"{region} {series.values[0][12]:,.0f}명", page.readout.text())
-        self.assertEqual(len(canvas._hover_lines), 2)
-        self.assertTrue(all(line.get_visible() and list(line.get_xdata()) == [12, 12]
-                            for line in canvas._hover_lines))
+        self.assertEqual(page.readout.text(), "")                  # 마우스를 올려도 값이 나타나지 않는다
+        self.assertEqual(canvas._hover_lines, [])                  # 세로 안내선도 만들지 않는다
+        self.window.tabs.setCurrentIndex(10)                       # 읽는 법 안내는 그대로 보인다
+        self.settle()
+        self.assertIn("실선은 여성, 점선은 남성", self.window.tab_pages[10].readout.text())
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "comparison.png"
             with patch("hotplace.ui.QFileDialog.getSaveFileName", return_value=(str(output), "PNG")):
                 self.window._save_png()
             self.assertTrue(output.is_file())
             self.assertGreater(output.stat().st_size, 1000)
-        self.assertFalse(any(line.get_visible() for line in canvas._hover_lines))
+
+    def test_hover_readout_still_works_when_enabled(self):
+        """HOVER_ENABLED 를 True 로 바꾸면 예전처럼 두 지역의 값을 읽어 준다."""
+        with patch("hotplace.plotting.HOVER_ENABLED", True):
+            window = self.open_window()
+            try:
+                page = window.tab_pages[0]
+                canvas = page.canvas
+                canvas.draw()
+                left = canvas.figure.axes[0]
+                x, y = left.transData.transform((12, left.get_ylim()[1] / 2))
+                canvas.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", canvas, x, y))
+                for region, series in zip("AB", window._results[0].analyses):
+                    self.assertIn(f"{region} {series.values[0][12]:,.0f}명", page.readout.text())
+                self.assertEqual(len(canvas._hover_lines), 2)
+                self.assertTrue(all(line.get_visible() and list(line.get_xdata()) == [12, 12]
+                                    for line in canvas._hover_lines))
+                canvas.clear_hover()                               # PNG 저장 전에 안내선을 숨기는 동작
+                self.assertFalse(any(line.get_visible() for line in canvas._hover_lines))
+
+                window.tabs.setCurrentIndex(8)
+                self.settle()
+                page = window.tab_pages[8]
+                page.canvas.draw()
+                ax = page.canvas.figure.axes[0]
+                x, y = ax.transData.transform((12, 0))
+                page.canvas.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", page.canvas, x, y))
+                self.assertIn(f"차이 {window._results[8].gap[12]:+,.0f}명", page.readout.text())
+            finally:
+                window.close()
+                window.deleteLater()
+                self.settle()
 
     def test_small_workspace_pages_have_no_horizontal_overflow(self):
         self.window.resize(1080, 740)
@@ -247,18 +317,49 @@ class ComparisonTests(unittest.TestCase):
                 self.window.tab_pages[index].canvas.draw()
 
     def test_added_comparisons_export_and_render(self):
-        for index, rows, columns in ((8, 25, 4), (9, 8, 3), (10, 25, 3), (11, 15, 4), (13, 4, 4)):
+        for index, rows, columns in ((8, 25, 4), (9, 8, 3), (10, 25, 5), (11, 15, 4)):
             with self.subTest(tab=index):
                 self.window.tabs.setCurrentIndex(index)
                 self.settle()
                 exported = self.window._results[index].csv_rows()
                 self.assertEqual(len(exported), rows)
                 self.assertTrue(all(len(row) == columns for row in exported))
-                text = " ".join(" ".join(row) for row in exported[:4] if index == CITY_TAB) or " ".join(exported[0])
+                text = " ".join(exported[0])
                 for dong in self.dongs[:2]:
                     self.assertIn(dong.label, text)
                 self.window.tab_pages[index].canvas.draw()
                 self.assertTrue(self.window.export_csv_button.isEnabled())
+
+    def test_gender_ratio_draws_women_and_men(self):
+        self.window.tabs.setCurrentIndex(10)
+        self.settle()
+        self.assertEqual(self.window.chart_title.text(), "시간대별 남녀 비율")
+        for series in self.window._results[10].analyses:
+            self.assertEqual(series.labels, ["여성", "남성"])
+            women, men = series.values
+            self.assertTrue(all(abs(w + m - 100) < 1e-9 for w, m in zip(women, men)))
+        canvas = self.window.tab_pages[10].canvas
+        canvas.draw()
+        for ax in canvas.figure.axes[:2]:
+            self.assertEqual(len([line for line in ax.get_lines() if len(line.get_xdata()) == 24]), 2)
+
+    def test_peak_labels_sit_away_from_the_other_line(self):
+        """두 선이 마주 보는 차트에서 정점 라벨이 가운데로 몰려 겹치지 않는다."""
+        women = [48.0] * 24
+        women[5] = 49.6                                            # 여성의 정점도 남성 선보다 아래에 있다
+        canvas = self.window.tab_pages[0].canvas
+
+        def label_offsets(values):
+            draw_result(canvas, LineSeries("남녀 비율", ["여성", "남성"], values, unit="%", reference=50))
+            return {note.get_text().split()[0]: note.xyann[1]
+                    for note in canvas.figure.axes[0].texts if isinstance(note, Annotation)}
+
+        offsets = label_offsets([women, [100 - value for value in women]])
+        self.assertLess(offsets["여성"], 0)                         # 아래쪽 선의 라벨은 아래로
+        self.assertGreater(offsets["남성"], 0)                      # 위쪽 선의 라벨은 위로
+        offsets = label_offsets([[50.0] * 24, [50.0] * 24])        # 값이 같으면 첫 계열이 위
+        self.assertGreater(offsets["여성"], 0)
+        self.assertLess(offsets["남성"], 0)
 
     def test_chart_pickers_remember_the_chart_in_each_group(self):
         tabs = self.window.tabs
@@ -272,28 +373,6 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(tabs.currentIndex(), 8)
         self.assertEqual(tabs.chart_picker.currentData(), 8)
         self.assertEqual(self.window.chart_title.text(), "시간대별 인구 차이 (A − B)")
-
-    def test_gap_and_city_hover_readouts(self):
-        self.window.tabs.setCurrentIndex(8)
-        self.settle()
-        page = self.window.tab_pages[8]
-        page.canvas.draw()
-        ax = page.canvas.figure.axes[0]
-        x, y = ax.transData.transform((12, 0))
-        page.canvas.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", page.canvas, x, y))
-        gap = self.window._results[8]
-        self.assertIn(f"차이 {gap.gap[12]:+,.0f}명", page.readout.text())
-
-        self.window.tabs.setCurrentIndex(CITY_TAB)
-        self.settle()
-        page = self.window.tab_pages[CITY_TAB]
-        page.canvas.draw()
-        scatter = self.window._results[CITY_TAB]
-        ax = page.canvas.figure.axes[0]
-        point = scatter.marks.index("B")
-        x, y = ax.transData.transform((scatter.day_night[point], scatter.weekend[point]))
-        page.canvas.callbacks.process("motion_notify_event", MouseEvent("motion_notify_event", page.canvas, x, y))
-        self.assertIn(f"B · {self.dongs[1].label}", page.readout.text())
 
     def test_screens_switch_immediately_without_animation(self):
         for index in (7, 1, 5, 0):
