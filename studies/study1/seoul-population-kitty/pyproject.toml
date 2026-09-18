@@ -10,4 +10,8 @@ dependencies = [
     "matplotlib>=3.8",
     "pyqt5>=5.15,<6",
     "pyqt-fluent-widgets>=1.11,<2",
+    # PyQt5-Qt5 의 Windows 휠은 5.15.2 가 마지막이고, Apple Silicon 휠은 그 뒤 버전에만 있다.
+    # 두 조건을 모두 적어야 uv 가 플랫폼별로 나눠 잠근다.
+    "pyqt5-qt5==5.15.2; sys_platform == 'win32'",
+    "pyqt5-qt5>5.15.2; sys_platform != 'win32'",
 ]

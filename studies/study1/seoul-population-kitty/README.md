@@ -69,6 +69,16 @@ open dist/HotplaceKitty.app
 앱 번들의 집계 캐시는 `~/Library/Caches/Hotplace/`에 저장한다.
 빌드 산출물 `build/`, `dist/`는 Git에서 제외한다.
 
+### Windows 앱 빌드
+
+PyInstaller는 실행한 운영체제용으로만 빌드하므로 Mac에서는 `.exe`를 만들 수 없다. 두 가지 방법이 있다.
+
+- **GitHub Actions**: 저장소의 Actions → *Windows build* → *Run workflow* (또는 `gh workflow run windows-build.yml`). 끝나면 실행 페이지의 Artifacts에서 `HotplaceKitty-windows-x64`를 내려받는다.
+- **Windows PC에서 직접**: 이 폴더에서 위와 같은 `uv run … pyinstaller --noconfirm Hotplace.spec`을 실행하면 `dist\HotplaceKitty\HotplaceKitty.exe`가 만들어진다.
+
+`HotplaceKitty.exe`는 같은 폴더의 `_internal\`과 함께 있어야 실행된다. 서명하지 않은 실행 파일이라 처음 실행할 때 SmartScreen 경고가 뜨면 ‘추가 정보 → 실행’을 누른다. 집계 캐시는 `_internal\.cache\`에 저장한다.
+Windows용 `PyQt5-Qt5` 휠은 5.15.2가 마지막이라 `pyproject.toml`에서 Windows만 그 버전으로 고정한다.
+
 ## 사용 가능한 화면
 
 | 화면 | 기능 |
@@ -196,7 +206,7 @@ CSV를 한 번 읽으면서 행정동별 시간·성별·연령 합계와 날짜
 ```text
 studies/study1/seoul-population-kitty/
 ├── app.py                 GUI / --check 진입점
-├── Hotplace.spec          macOS 앱 빌드 설정
+├── Hotplace.spec          macOS·Windows 앱 빌드 설정
 ├── pyproject.toml         PyQt5 전용 의존성
 ├── hotplace/
 │   ├── dataset.py         CSV 종류 판별·검증·관측 집계·품질·캐시

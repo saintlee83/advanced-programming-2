@@ -1,0 +1,59 @@
+# 서울 생활인구 비교 앱 두 개를 Windows x64 용으로 빌드한다.
+# PyInstaller 는 교차 컴파일을 지원하지 않아 Windows 러너에서 직접 빌드해야 한다.
+#
+# 실행: GitHub → Actions → "Windows build" → Run workflow
+#       또는  gh workflow run windows-build.yml
+# 결과: 실행 페이지 아래 Artifacts 에서 zip 두 개를 내려받는다.
+#       압축을 풀고 Hotplace.exe / HotplaceKitty.exe 를 실행한다 (_internal 폴더와 함께 둬야 한다).
+name: Windows build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.app }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # 저장소 루트의 pyproject.toml (PySide6) 환경을 쓴다.
+          - app: Hotplace
+            dir: studies/study1/seoul-population
+          # 폴더 안의 pyproject.toml (PyQt5) 환경을 쓴다.
+          - app: HotplaceKitty
+            dir: studies/study1/seoul-population-kitty
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      # 빌드한 exe 는 러너에서 실행해 볼 수 없으므로, 같은 환경에서 테스트를 돌려 Windows 동작을 확인한다.
+      - name: Test
+        continue-on-error: true
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --locked python -m unittest discover -s tests -v
+
+      - name: Build
+        run: uv run --locked --with "pyinstaller>=6.16,<7" pyinstaller --noconfirm Hotplace.spec
+
+      - name: Check output
+        shell: bash
+        run: |
+          test -f "dist/${{ matrix.app }}/${{ matrix.app }}.exe"
+          du -sh "dist/${{ matrix.app }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-windows-x64
+          path: ${{ matrix.dir }}/dist/${{ matrix.app }}
+          if-no-files-found: error
