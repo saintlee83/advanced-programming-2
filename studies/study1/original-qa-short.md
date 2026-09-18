@@ -1,119 +1,175 @@
-# Original ver — "이건 어떻게 구현했나요?" 답변 (코드 기준)
-
-경로 기준: `seoul-population/hotplace/`
-
+# Original ver — "이건 어떻게 구현했나요?" 답변
 
 ## 분석 분류별 구현
 
-모든 분석은 `hotplace.py › Hotplace.analysisN()`이 계산해서 결과 객체를 반환하고, `plotting.py › draw_result()`가 그 타입에 맞춰 그립니다. A·B를 따로 계산하는 분석은 `PairedAnalysis`로 묶어 좌우 두 차트(`subplots(1, 2, sharex, sharey)`)로 그립니다.
+모든 분석은 분석 번호별로 숫자를 계산하는 함수가 결과를 만들고, 결과 종류를 보고 알맞은 그래프를 골라 그리는 함수가 화면에 그립니다. A·B를 따로 계산하는 차트는 `subplots(1, 2, sharex=True, sharey=True)`로 좌우 두 칸에 같은 눈금으로 그립니다.
 
 ### 하루 흐름
 
-**시간대 (analysis1)**
-A. `mean_hourly()`로 `total[h] / counts[h]`를 24시간 모두 계산해 `LineSeries`로 반환하고, `draw_line_series()`가 꺾은선과 그 아래 영역으로 그립니다.
+**시간대**
+A. 시간대별 합계를 관측된 날 수로 나눠 주는 함수를 통해 24시간 평균을 구하고, `plot()`으로 꺾은선을 그린 뒤 선 아래를 그라데이션으로 칠했습니다.
 
-**평일·주말 (analysis2)**
-A. 읽을 때 `_is_weekend()`로 나눠 누적한 `weekday[h]`, `weekend[h]`를 각각 `weekday_counts`, `weekend_counts`로 나눠 선 두 개로 그립니다.
+**평일·주말**
+A. 파일을 읽을 때 날짜로 평일·주말을 나눠 따로 더해 두고, 각각 평균 내서 `plot()`으로 선 두 개를 그렸습니다.
 
-**겹쳐 보기 (analysis4)**
-A. `place_a.analysis4(place_b)`가 두 지역의 `mean_hourly()`를 한 `LineSeries`에 넣어서, 한 차트에 A·B 선 두 개를 겹쳐 그립니다.
+**겹쳐 보기**
+A. A·B의 시간대 평균을 한 그래프에 넣어 선 두 개를 겹쳐 그렸습니다.
 
-**시간대별 차이 (analysis9)**
-A. 두 지역의 `mean_hourly()`를 `HourlyGap`에 담고 `gap` 속성에서 시간대별 `A − B`를 구합니다. `draw_gap()`이 0 기준선 위는 A 색, 아래는 B 색 막대로 그립니다.
+**시간대별 차이**
+A. 시간대마다 `A − B`를 계산해서, A가 많으면 위로 초록 막대, B가 많으면 아래로 보라 막대를 그렸습니다. 막대 끝은 matplotlib `Rectangle`을 상속해 둥글게 만든 막대로 그렸습니다.
 
-**흐름 비교 (analysis8)**
-A. 지역마다 `시간대 값 / 하루 평균 × 100`으로 평균을 100에 맞춰, 인구 규모가 달라도 하루 흐름 모양만 비교합니다. `reference=100`으로 기준 점선을 그립니다.
+**흐름 비교**
+A. 지역마다 하루 평균을 100으로 맞춰 `값 / 평균 × 100`으로 바꿔서, 인구 규모가 달라도 하루 흐름 모양만 비교하게 했습니다. 100 위치에는 `axhline()`으로 기준 점선을 그렸습니다.
 
 ### 요일·날짜
 
-**요일별 (analysis10)**
-A. `analysis7()`의 요일×시간 평균을 요일마다 다시 `finite_mean()`으로 평균 내서 월~일 7개 값으로 만들고, `categories=WEEKDAYS`로 요일 축 꺾은선을 그립니다.
+**요일별**
+A. 날짜에서 `weekday()`로 요일을 구해 월~일로 묶고 요일마다 평균을 내서, 요일 7개를 x축으로 하는 꺾은선으로 그렸습니다.
 
-**요일×시간 (analysis7)**
-A. `daily[날짜][시간]` 값을 `datetime.strptime(...).weekday()`로 7×24 칸에 모아 칸마다 평균 낸 `Heatmap`을 반환하고, `draw_heatmaps()`가 `imshow()`로 A·B를 위아래에 같은 색 범위(`vmax`)로 그립니다.
+**요일×시간**
+A. 요일 7줄 × 시간 24칸 표를 만들어 칸마다 평균을 내고, `imshow()`로 색이 진할수록 사람이 많은 히트맵을 그렸습니다. A·B는 두 지역 중 가장 큰 값을 `vmax`로 같이 써서 같은 색이면 같은 값이 되게 했습니다.
 
-**일별 추이 (analysis6)**
-A. 날짜별로 24시간이 모두 있는 날만 일평균을 내고, 연속 7일이 모두 유효할 때만 7일 이동평균을 계산합니다. `xlabels=날짜`로 날짜 축 꺾은선 두 개를 그립니다.
+**일별 추이**
+A. 24시간이 모두 있는 날만 하루 평균을 구하고, 연속 7일이 모두 있을 때만 7일 이동평균을 계산해서 날짜 축 선 두 개로 그렸습니다.
 
 ### 성별·연령
 
-**성별 (analysis3)**
-A. `mean_by_gender()`가 `age[h]`의 앞 14칸(남자)과 뒤 14칸(여자)을 각각 합쳐 시간대 평균을 내고, 남녀 선 두 개로 그립니다.
+**성별**
+A. 연령대 칸 28개 중 앞 14칸은 남자, 뒤 14칸은 여자로 합쳐서 시간대별 남녀 선 두 개로 그렸습니다.
 
-**여성 비율 (analysis11)**
-A. 같은 남녀 값으로 `여자 / (남자 + 여자) × 100`을 시간대마다 구하고, `reference=50`으로 50% 점선을 함께 그립니다.
+**여성 비율**
+A. 시간대마다 `여자 / (남자 + 여자) × 100`을 계산하고, `axhline()`으로 50% 기준 점선을 함께 그렸습니다.
 
-**연령 (analysis5)**
-A. `mean_by_age()`가 24시간 연령대 값을 모두 더해 관측 수로 나누고, `draw_age_pyramid()`가 `barh()`로 남자는 음수(왼쪽), 여자는 양수(오른쪽) 막대를 그려 피라미드를 만듭니다.
+**연령**
+A. 연령대별 남녀 평균을 구해서 `barh()` 가로 막대로 남자는 왼쪽, 여자는 오른쪽에 그려 인구 피라미드를 만들었습니다.
 
-**연령 비중 (analysis12)**
-A. `age_shares()`가 남녀를 합친 연령대별 값을 전체 합으로 나눠 %로 바꾸고, `draw_age_shares()`가 연령대마다 A·B 점을 찍고 두 점을 선으로 이어 차이를 보여 줍니다.
+**연령 비중**
+A. 연령대별 인구를 전체로 나눠 %로 바꾸고, `scatter()`로 연령대마다 A·B 점을 찍어 선으로 이어 차이를 보여 줬습니다.
 
-**연령×시간 (analysis13)**
-A. 시간대마다 그 시간 인구를 100%로 보고 연령대 비중을 구한 14×24 `Heatmap`을 만들고, 나이 많은 연령대가 위로 오게 뒤집어서 `draw_heatmaps()`로 그립니다.
+**연령×시간**
+A. 시간마다 그 시간 인구를 100%로 보고 연령대별 비중을 구한 14줄 × 24칸 표를 만들어, `imshow()` 히트맵으로 그렸습니다. 나이 많은 연령대가 위로 오게 줄 순서를 뒤집었습니다.
 
 ### 서울 전체
 
-**서울 속 위치 (analysis14)**
-A. `character_points()`가 서울 모든 행정동의 `summary()`에서 낮÷밤, 주말÷평일 배율을 구하고, `draw_city_scatter()`가 전체는 회색 점, A·B는 색 점으로 산점도를 그립니다. 상권 유형 기준 상수를 `axvline()`, `axhline()` 점선으로 표시합니다.
+**서울 속 위치**
+A. 서울 모든 행정동의 `낮 ÷ 밤`, `주말 ÷ 평일` 배율을 계산해서 `scatter()`로 산점도를 그리고, 전체는 회색 점, A·B는 색 점으로 표시했습니다. 상권 유형을 나누는 기준값은 `axvline()`, `axhline()` 점선으로 그렸습니다.
 
 ---
 
-## 기능별 구현
+## 기능별 구현 (화면 순서대로)
 
-**Q. CSV 불러오기는 어떻게 구현했나요?**
-A. `dataset.py › load_population()`에서 `csv.reader`로 한 줄씩 읽고, 열 번호 상수(`COL_DATE=0, COL_HOUR=1, COL_CODE=2, COL_TOTAL=3, COL_MALE=4, COL_FEMALE=18`)로 값을 꺼냅니다. 그 값을 행정동 코드를 키로 하는 `dict[int, DongAggregate]`의 `total[24]`, `weekday/weekend[24]`, `age[24][28]`, `counts[24]`에 바로 누적해서, 원본 대신 집계본만 들고 있습니다.
+### 1. 전체 화면 구성
 
-**Q. 평균은 어떻게 계산했나요?**
-A. `hotplace.py › Hotplace._mean()`이 누적합을 시간대별 실제 관측 수 `counts[h]`로 나눕니다. `n == 0`이면 `float("nan")`을 넣고, 이후 `finite_mean()`에서 NaN은 빼고 평균을 냅니다.
+**Q. 왼쪽 메뉴로 화면을 바꾸는 건요?**
+A. 왼쪽에 qfluentwidgets의 `NavigationPushButton`으로 ‘지역 비교 / 비교 리포트 / 지역 찾기 / 데이터’ 메뉴 버튼을 세로로 놓았습니다. 오른쪽에는 네 화면을 `QStackedWidget`에 겹쳐 넣어 두고, 버튼의 `clicked` 신호에 화면 번호를 넘겨 `setCurrentIndex(번호)`로 그 화면을 보여 주고, 위쪽 제목 글자와 선택된 메뉴 표시도 같이 바꿉니다.
 
-**Q. 중복 행·잘못된 값은요?**
-A. `daily[date]`에 이미 같은 hour가 있으면 `duplicate_rows += 1` 후 `continue`로 건너뜁니다. 날짜 형식, 시간 범위(0~23), 음수·무한대는 검사해서 `DataError(f"{line_no}행: ...")`로 몇 번째 행인지 알려 줍니다.
+**Q. 화면이 바뀔 때 부드럽게 넘어가는 효과는요?**
+A. `QStackedWidget`을 상속해서, 바꾸기 직전 화면을 `grab()`으로 사진 찍듯 캡처하고 새 화면으로는 바로 바꿉니다. 그 위에 캡처한 그림을 올려 두고 `QVariantAnimation`으로 0.24초 동안 점점 투명하게, 옆으로 조금씩 밀어서 사라지게 그렸습니다. 이 그림은 마우스 클릭을 통과시켜서 효과가 도는 중에도 새 화면을 바로 누를 수 있습니다.
 
-**Q. 두 번째 실행이 빠른 건요?**
-A. `_cache_path()`가 두 파일의 경로·크기·수정시각(`st_mtime_ns`)을 SHA-1로 해시해 캐시 파일 이름을 만들고, 집계 결과 `Population`을 `pickle.dump()`로 저장합니다. 다음 실행에서 같은 이름의 파일이 있으면 `pickle.load()`로 바로 불러옵니다.
+**Q. 애니메이션 끄기 버튼은요?**
+A. 버튼을 누르면 앱 전체에 `setProperty("reducedMotion", True)` 값을 걸어 두고, 화면을 바꿀 때 이 값을 확인해서 켜져 있으면 캡처·효과 없이 바로 바꿉니다.
 
-**Q. 로딩 중에 화면이 안 멈추는 건요?**
-A. `ui.py › start_load()`에서 `LoadWorker(QObject)`를 만들어 `moveToThread(QThread)`로 옮기고, `thread.started`에 `worker.run`을 연결합니다. 워커는 `load_population(progress=콜백)`의 진행률을 `progress = Signal(int, str)`로, 결과를 `loaded = Signal(object, object)`로 보내고, 메인 스레드의 `_on_progress()`, `_on_loaded()`가 받아서 화면을 갱신합니다.
+**Q. 어두운 테마 버튼은요?**
+A. 밝은 색 묶음과 어두운 색 묶음을 미리 정해 두고, 버튼을 누르면 사용할 색 묶음을 바꾼 뒤 그 색으로 QSS를 다시 만들어 `setStyleSheet()`로 다시 칠합니다. 아이콘도 새 색으로 다시 그리고, 지금 보고 있는 차트도 새 색으로 다시 그립니다.
 
-**Q. 로딩 중에 창을 닫으면요?**
-A. `closeEvent()`에서 `thread.requestInterruption()`을 호출하고 `event.ignore()`로 닫기를 한 번 보류합니다. 워커는 매 행 `isInterruptionRequested()`를 확인해 `DataError`로 빠져나오고, `_on_failed()`에서 `_closing` 플래그를 보고 창을 닫습니다.
+### 2. 데이터 불러오기
+
+**Q. 처음 화면의 ‘데이터 불러오기’ 버튼은요?**
+A. 누르면 ‘데이터’ 화면으로 이동하고, 파일 경로 두 칸이 이미 채워져 있으면 바로 불러오기를 시작합니다. 앱을 켤 때 기본 데이터 폴더를 찾아 두 경로를 미리 채워 두기 때문에, 보통은 버튼 한 번으로 바로 불러옵니다.
+
+**Q. ‘찾아보기’ 버튼을 누르면 뜨는 파일 선택 창은요?**
+A. 생활인구 파일과 행정동 코드표마다 경로 입력칸(`LineEdit`)과 ‘찾아보기’ 버튼을 하나씩 두었습니다. 버튼을 누르면 `QFileDialog.getOpenFileName()`으로 파일 선택 창을 띄우고, 고른 경로를 그 칸에 `setText()`로 넣습니다. 경로를 직접 붙여 넣어도 됩니다.
+
+**Q. 경로를 비워 두고 불러오기를 누르면요?**
+A. 두 칸 중 하나라도 비어 있으면 `QMessageBox.warning()`으로 “파일 경로 필요” 경고창을 띄우고 멈춥니다.
+
+**Q. 불러오는 동안 진행 막대가 차오르는 건요?**
+A. 파일 읽기만 따로 맡는 클래스를 만들어 `QThread`에서 돌렸습니다. 이 클래스가 일정 줄 수마다 진행률(%)과 메시지를 PySide6의 `Signal`로 보내면, 화면 쪽에서 받아 진행 막대(`ProgressBar`)의 `setValue()`와 상태 글자를 바꿉니다. 읽기를 따로 돌리기 때문에 그동안 창이 멈추지 않습니다. 불러오는 동안에는 경로 칸과 버튼을 `setEnabled(False)`로 막아 둡니다.
+
+**Q. 30만 줄 CSV는 어떻게 읽었나요?**
+A. `csv.reader`로 한 줄씩 읽으면서 행정동별로 시간대 합계를 바로 더해 주는 함수를 통해, 원본 대신 요약본만 들고 있게 했습니다. 같은 날짜·시간·동이 두 번 나오면 첫 줄만 쓰고, 날짜 형식이나 숫자가 잘못되면 몇 번째 줄이 문제인지 알려 줍니다. 요약본은 파일로 저장해 두고, 같은 파일을 다시 불러오면 바로 꺼내 씁니다.
+
+**Q. 불러온 뒤 데이터 화면 아래에 나오는 요약 칸은요?**
+A. 행정동 수·기간·관측 완전성·제외한 중복 행 4칸을 미리 만들어 숨겨 두었다가, 불러오기가 끝나면 데이터 품질을 계산하는 함수를 통해 값을 구해 `setText()`로 채우고 `show()`로 보이게 했습니다.
+
+**Q. 불러오기가 끝나면 오른쪽 위에 뜨는 완료 알림은요?**
+A. qfluentwidgets의 `InfoBar.success()`로 “불러오기 완료” 알림을 오른쪽 위(`InfoBarPosition.TOP_RIGHT`)에 띄우고, `duration=2500`으로 2.5초 뒤 자동으로 닫히게 했습니다. 동시에 ‘지역 비교’ 화면으로 이동하고, 일평균 인구 1위·2위 동네를 지역 A·B로 미리 골라 두어서 바로 차트가 보입니다.
+
+**Q. 불러오기에 실패하면요?**
+A. 읽는 중 오류가 나면 실패 신호를 보내고, 화면 쪽에서 `QMessageBox.critical()`로 오류 내용을 보여 줍니다.
+
+### 3. 지역 선택
 
 **Q. 지역 드롭다운(자치구 → 행정동)은 어떻게 구현했나요?**
-A. `RegionSelector.populate()`가 `codebook.sigungu_list()`로 코드표 CSV의 자치구 목록을 가져와 첫 번째 `ComboBox`에 `addItems()` 합니다. 자치구를 바꾸면 `currentIndexChanged` → `_on_sigungu_changed()`가 `codebook.in_sigungu()`로 그 구의 행정동을 가져오고, `population.has(dong.code)`로 인구 데이터에 있는 동만 `addItem(dong.name, userData=dong)`으로 넣습니다. 행정동을 고르면 `changed` 시그널 → `MainWindow._on_region_changed()` → `_render_current()`로 차트가 다시 그려집니다. 목록을 채우는 동안에는 `_loading` 플래그로 시그널을 막아 중간에 여러 번 다시 그리지 않게 했습니다.
+A. 코드표 CSV에서 자치구 이름 목록을 뽑아 주는 함수를 통해 첫 번째 `ComboBox`를 채웠습니다. 자치구를 바꾸면 `currentIndexChanged` 신호가 그 구의 행정동만 골라 오는 함수를 실행해 두 번째 `ComboBox`를 다시 채우는데, 인구 데이터에 실제로 있는 동만 넣습니다. 행정동 항목에는 `addItem(이름, userData=행정동 정보)`로 코드를 함께 넣어 두고, 행정동을 고르면 직접 만든 `Signal`을 보내 지표와 차트를 다시 그립니다.
 
-**Q. 분석 탭 14개는 어떻게 분석 함수와 연결했나요?**
-A. `tabs.currentChanged` → `_render_current()`에서 탭 번호 `index`를 받아 `getattr(place_a, f"analysis{index + 1}")`로 해당 분석을 부릅니다. 두 지역을 한 번에 계산하는 탭(`PAIR_TABS = {3, 7, 8, 11}`)은 `place_a.analysisN(place_b)`, 나머지는 A·B 각각 실행해서 `PairedAnalysis`로 묶습니다. 결과는 `self._results[index]`에 캐시하고 지역이 바뀌면 `clear()` 합니다.
+**Q. 지역 A·B 사이의 교환 버튼은요?**
+A. A·B 드롭다운에 선택된 행정동을 서로 바꿔 넣는 함수를 통해 두 지역을 바꿉니다. 바꾸는 동안 `blockSignals(True)`로 신호를 잠시 막아 차트가 두 번 그려지지 않게 하고, 다 바꾼 뒤 한 번만 다시 그립니다.
 
-**Q. 계산 결과를 그래프로 어떻게 그렸나요?**
-A. `analysisN()`은 `LineSeries`, `AgePyramid`, `Heatmap` 같은 dataclass만 반환하고, `plotting.py › draw_result()`가 `isinstance`로 타입을 확인해 `draw_line_series`, `draw_age_pyramid`, `draw_heatmaps` 등을 부릅니다. 캔버스는 `FigureCanvasQTAgg`를 상속한 `PlotCanvas`입니다.
+**Q. ‘지역 찾기’ 화면의 검색은요?**
+A. qfluentwidgets의 `SearchLineEdit`에 이름을 넣고 검색하면 `searchSignal`로 검색 함수를 실행합니다. 이 함수는 코드표에서 행정동 이름·자치구·코드로 찾아서, 하나면 바로 넣고, 없으면 `QMessageBox.information()`으로 “검색 결과 없음”을 띄웁니다. 결과를 넣을 자리(지역 A 또는 B)는 옆의 `ComboBox`로 고릅니다.
 
-**Q. A·B 비교 차트는 어떻게 맞췄나요?**
-A. `draw_paired_analysis()`에서 `figure.subplots(1, 2, sharex=True, sharey=True)`로 좌우 축을 공유하고, 히트맵은 `draw_heatmaps()`에서 두 지역 값 중 최댓값을 `vmax`로 같이 써서 색 범위를 맞췄습니다.
+**Q. 같은 이름의 동이 여러 곳일 때 뜨는 선택 팝업은요?**
+A. ‘신사동’처럼 여러 구에 있는 이름이면 `QDialog`로 새 창을 만들고, 그 안의 `QListWidget`에 “자치구 동이름 (코드)” 목록을 넣었습니다. `exec()`로 띄워서 ‘선택’을 누르거나 항목을 더블클릭하면 그 동을 지역 A 또는 B에 넣습니다.
 
-**Q. 마우스를 올리면 값이 나오는 건요?**
-A. `PlotCanvas`에서 `mpl_connect("motion_notify_event", _on_motion)`으로 마우스 이벤트를 받아, `round(event.xdata)`로 시간대를 구합니다. `_series_readout()`이 그 시간의 A·B 값을 꺼내고, 커서 옆 `HoverCallout(QFrame)`에 표시합니다.
+**Q. 순위표에서 지역을 고르는 건요?**
+A. qfluentwidgets의 `TableWidget`에 생활인구 상위 20곳을 채우고, 행마다 `setData(Qt.UserRole, 행정동 정보)`로 동 정보를 숨겨 넣었습니다. 위의 `ComboBox`로 정렬 기준(일평균·붐비는 시간 인구·주말÷평일·낮÷밤)을 바꾸면 순위를 다시 계산해 표를 다시 채우고, 행을 더블클릭하면 그 동을 지역 A 또는 B에 넣은 뒤 ‘지역 비교’ 화면으로 돌아갑니다.
+
+**Q. 위쪽 ‘주요 지표’ 칸은요?**
+A. 일평균·가장 붐비는 시간·낮÷밤·주말÷평일 4칸에 A·B 값을 나란히 보여 주는 칸을 만들었습니다. 지역이 바뀌면 요약 통계를 계산하는 함수를 통해 값을 구해 `setText()`로 바꾸고, 값에 마우스를 올리면 `setToolTip()`으로 전체 요약이 나옵니다.
+
+**Q. A와 B를 같은 동네로 고르면 뜨는 안내는요?**
+A. 안내 문구 `QLabel`을 미리 만들어 숨겨 두고, 지역이 바뀔 때마다 두 코드가 같은지 비교해서 `setVisible()`로 보이거나 숨깁니다.
+
+**Q. ‘상세 통계’ 버튼을 누르면 뜨는 팝업은요?**
+A. `QDialog`로 새 창을 만들고, 그 안에 지역 A·B의 요약 문장을 `QPlainTextEdit` 두 개에 읽기 전용으로 넣었습니다. `exec()`로 띄워서 창을 닫기 전까지는 뒤의 메인 창을 누를 수 없게 했습니다.
+
+### 4. 차트 보기
+
+**Q. 분석 분류·차트 탭을 누르면 차트 화면이 바뀌는 건요?**
+A. 위 줄은 qfluentwidgets의 `SegmentedWidget`(분류 4개), 아래 줄은 `Pivot`(그 분류의 차트 탭)으로 만들었습니다. 차트마다 그래프 한 장을 미리 만들어 화면 전환 효과가 있는 `QStackedWidget`에 넣어 두었습니다.
+1. 탭 항목마다 `addItem(..., onClick=...)`으로 누르면 그 차트 번호로 이동하게 연결했습니다.
+2. 탭을 누르면 `setCurrentIndex(차트 번호)`로 그 차트 장을 앞으로 가져옵니다.
+3. 분류를 누르면 그 분류에서 마지막으로 봤던 차트로 이동하고, 아래 줄 탭도 그 분류의 탭 묶음으로 바꿉니다.
+4. 장이 바뀌면 `currentChanged` 신호로 메인 창에 알리고, 메인 창이 그 번호에 맞는 분석 함수로 계산해 그 장의 그래프를 그린 뒤 차트 제목·설명 `QLabel`도 바꿉니다.
+5. 한 번 계산한 결과는 번호별로 저장해 두었다가 다시 고르면 계산 없이 바로 그리고, 지역이 바뀌면 저장해 둔 결과를 지웁니다.
+
+**Q. matplotlib 그래프를 PySide6 창 안에 넣은 건요?**
+A. matplotlib의 `FigureCanvasQTAgg`를 상속한 그래프 위젯을 만들어서, 그래프를 일반 Qt 위젯처럼 레이아웃에 넣었습니다.
+
+**Q. 계산과 그래프는 어떻게 연결했나요?**
+A. 분석 함수는 숫자 묶음만 반환하고, 묶음 종류를 보고 선 그래프·막대·피라미드·히트맵·산점도 중 맞는 그리기 함수를 골라 주는 함수를 통해 그리게 했습니다.
+
+**Q. 평균은 어떻게 계산했나요?**
+A. 시간대별 합계를 그 시간대가 실제로 관측된 횟수로 나누는 함수를 통해 계산했고, 관측이 없으면 0 대신 빈 값(NaN)으로 두었습니다.
+
+**Q. 마우스를 올리면 커서 옆에 뜨는 말풍선은요?**
+A. `mpl_connect("motion_notify_event")`로 마우스가 움직일 때마다 위치를 받아 가장 가까운 시간대를 구하고, 그 시간에 세로선과 점을 보여 줍니다. 말풍선은 `QFrame` 안에 `QLabel`을 넣고 `QGraphicsDropShadowEffect`로 그림자를 준 것이고, 지역 색 점(●)과 값을 넣어 커서 오른쪽 위로 `move()`합니다. 창 끝에 닿으면 반대쪽으로 뒤집어 나오고, 말풍선은 마우스 클릭을 통과시켜서 아래 차트 조작을 막지 않습니다.
 
 **Q. 확대·이동은요?**
-A. `wheelEvent()`에서 Ctrl/⌘+휠, `event()`에서 트랙패드 핀치(`NativeGesture`)를 받아 `zoom()`으로 커서 위치 기준 `set_xlim()`을 바꿉니다. 드래그는 `button_press_event`/`motion_notify_event`로 `_pan()`, 더블클릭은 `reset_view()`입니다. 처음 범위를 `_home`에 저장해 두고 `_limit()`에서 그 밖으로 못 나가게 막았습니다.
+A. matplotlib 툴바를 쓰지 않고 직접 만들었습니다. `wheelEvent()`에서 Ctrl(⌘)+휠, `event()`에서 트랙패드 핀치를 받아 커서 위치를 중심으로 `set_xlim()` 범위를 좁히고, 마우스 드래그로 범위를 옮깁니다. 처음 범위를 저장해 두고 그 밖으로는 못 나가게 했고, 더블클릭하거나 확대했을 때만 나타나는 ‘원래 크기’ 버튼을 누르면 처음 범위로 돌아갑니다. 확대 여부는 직접 만든 `Signal`로 알려서 그 버튼을 `setVisible()`로 보이거나 숨깁니다.
 
-**Q. 페이지 전환 애니메이션은요?**
-A. `widgets.py › AnimatedStack.setCurrentIndex()`에서 바꾸기 전 화면을 `grab()`으로 캡처하고, 페이지는 즉시 바꾼 뒤 캡처한 그림을 `TransitionOverlay`에 올려 `QVariantAnimation`으로 흐려지며 옆으로 밀려나게 그립니다.
+### 5. 비교 리포트 · 저장 · 종료
 
-**Q. 다크 테마는요?**
-A. `theme.py`에 색 묶음 `LIGHT`, `DARK`를 두고, `_toggle_theme()` → `apply_theme()`이 전역 테마를 바꾼 뒤 Qt 스타일시트·`QPalette`·matplotlib 색을 다시 적용하고 `_render_current()`로 차트를 다시 그립니다.
+**Q. ‘비교 리포트’ 화면은요?**
+A. 위에는 하루 흐름 유사도(상관계수)·차이가 가장 큰 시간·일평균 차이 3칸을 `QHBoxLayout`으로 가로로 놓고, 아래에는 항목별로 A·B 값을 나란히 놓은 비교표를 `QGridLayout`으로 만들었습니다. 지역이 바뀔 때마다 비교 지표를 계산하는 함수를 통해 값을 다시 채웁니다.
 
-**Q. 상권 유형은 어떻게 판정했나요?**
-A. `Hotplace.summary()`에서 주말÷평일, 낮(9~18시)÷밤(0~6시) 배율, 가장 붐비는 시간을 구하고, `_character()`가 상수 기준(`WEEKEND_BUSY=1.03`, `WEEKDAY_BUSY=0.93`, `OFFICE_DAY_NIGHT=1.3`, `RESIDENTIAL_DAY_NIGHT=1.05`)과 `if`문으로 비교해 주말 상권·업무지구·주거지·혼합형으로 나눕니다.
+**Q. 비교표의 ‘차트에서 보기 ›’ 링크는요?**
+A. `QLabel`에 `<a href="차트 번호">` 링크를 넣고 `linkActivated` 신호로 차트 번호를 받습니다. 그 번호로 차트 탭을 바꾸고 ‘지역 비교’ 화면으로 이동한 뒤, `ensureWidgetVisible()`로 차트가 보이는 위치까지 스크롤합니다.
 
-**Q. '평소와 다른 날'은요?**
-A. `analytics.py › diagnostics()`에서 `analysis6()`의 일평균을 평일·주말로 나누고, 각 묶음의 중앙값과 MAD로 수정 z 점수 `0.6745 × (값 − 중앙값) / MAD`를 구해 3.5를 넘는 날을 골랐습니다.
+**Q. 리포트 저장은요?**
+A. `QFileDialog.getSaveFileName()`으로 저장 창을 띄우고, 비교 리포트를 글로 만들어 주는 함수를 통해 만든 문장을 `.txt` 파일로 저장합니다.
 
-**Q. 두 지역 유사도는요?**
-A. `compare_places()`에서 두 지역 24시간 평균값으로 피어슨 상관계수를 직접 계산하고, `similarity_label()`이 0.9 / 0.7 / 0.4 기준으로 "매우 비슷함"~"다름"으로 바꿉니다.
+**Q. PNG·CSV 저장 버튼을 누르면 뜨는 저장 창은요?**
+A. `QFileDialog.getSaveFileName()`으로 저장 창을 띄우고, 기본 파일 이름은 차트 제목으로 넣었습니다. PNG는 `figure.savefig()`로 화면의 2배 해상도로, CSV는 계산 결과를 표 형태로 바꿔 주는 함수를 통해 `csv.writer`로 저장합니다. 엑셀에서 한글이 깨지지 않도록 `utf-8-sig`로 저장하고, 저장에 실패하면 `QMessageBox.critical()`로 알립니다. 차트가 아직 없을 때는 버튼을 `setEnabled(False)`로 눌리지 않게 했습니다.
 
-**Q. PNG·CSV 저장은요?**
-A. `_save_png()`는 `QFileDialog.getSaveFileName()`으로 경로를 받아 `canvas.figure.savefig(dpi=EXPORT_DPI)`로 저장합니다. `_export_csv()`는 결과 객체의 `csv_rows()`를 `csv.writer().writerows()`로 `utf-8-sig` 인코딩으로 씁니다.
+**Q. 불러오는 도중에 창을 닫으면요?**
+A. 창을 닫을 때 실행되는 `closeEvent()`에서 읽기가 진행 중이면 `requestInterruption()`으로 중단을 요청하고 닫기를 잠시 미룹니다. 읽기 쪽이 멈추면 그때 창을 닫습니다.
+
+### 6. 디자인
 
 **Q. 디자인은 어떻게 했나요?**
-A. `theme.py`에 색 묶음을 `Theme` dataclass(`LIGHT`, `DARK`)로 한 곳에 정의하고, `apply_theme()`이 이 색으로 Qt 쪽(`QPalette`, `app.setStyleSheet()`, qfluentwidgets `setTheme()`/`setThemeColor()`)을 칠합니다. 차트 쪽은 그리는 함수들이 `theme()`에서 같은 색을 읽어 쓰고, `_style_axes()`에서 테두리(spine)를 아래쪽만 남기고 눈금선·글자색을 옅게 정리했습니다. 위젯마다 `setProperty("role", ...)`를 붙이고 스타일시트에서 `QLabel[role="heading"]`처럼 역할별로 글자 크기·색을 지정했고, 아이콘은 SVG 문자열을 `QSvgRenderer`로 그려(`make_icon()`) 테마 색을 그대로 입힙니다.
+A. 색을 밝은 테마·어두운 테마 두 묶음으로 한 곳에 정해 두고, 그 색으로 QSS를 만들어 `setStyleSheet()`로 앱 전체에 적용했습니다. 위젯마다 `setProperty("role", ...)`로 역할을 붙여 역할별로 글자 크기와 색을 다르게 했고, qfluentwidgets 부품은 `setTheme()`, `setThemeColor()`로 같은 색에 맞췄습니다. 화면 틀은 흰색·회색으로 두고 색은 지역 A(초록)·B(보라) 데이터에만 썼으며, 그래프도 같은 색을 읽어서 그리고 아래쪽 축선만 남겨 깔끔하게 보이게 했습니다.
+
+**Q. 아이콘과 한글 글꼴은요?**
+A. 아이콘은 SVG 도형을 글자로 적어 두고 `QSvgRenderer`로 그때그때 그려서 테마 색을 그대로 입혔습니다. 그래프 한글은 설치된 한글 글꼴을 찾아 matplotlib에 지정하는 함수를 통해 깨지지 않게 했습니다.
